@@ -289,19 +289,49 @@ async function handleClientMessage(tenant, client, phone, messageText, phoneNumb
 
   // Handle actions
   if (aiResponse.action === 'send_products' && aiResponse.products?.length > 0) {
-    // Send product images with captions
-    for (const product of aiResponse.products.slice(0, 5)) {
-      const imageUrl = product.image_url || (product.image_urls && product.image_urls[0]);
+    // Fetch real product data from DB for accurate images and prices
+    const productIds = aiResponse.products.map((p) => p.id).filter(Boolean);
+    let dbProducts = [];
+    if (productIds.length > 0) {
+      const placeholders = productIds.map((_, i) => `$${i + 2}`).join(',');
+      const dbResult = await pool.query(
+        `SELECT * FROM products WHERE tenant_id = $1 AND id IN (${placeholders}) AND is_active = true`,
+        [tenant.id, ...productIds]
+      );
+      dbProducts = dbResult.rows;
+    }
+
+    // Send product images with name + price caption
+    for (const dbProd of dbProducts.slice(0, 5)) {
+      const imageUrl = dbProd.image_urls && dbProd.image_urls.length > 0 ? dbProd.image_urls[0] : null;
       if (imageUrl) {
-        const caption = `*${product.name}*\nPrice: ₹${product.price}`;
+        const caption = `*${dbProd.name}*\nSKU: ${dbProd.sku || 'N/A'}\nPrice: ₹${dbProd.price}${dbProd.gst_rate > 0 ? ` + ${dbProd.gst_rate}% GST` : ''}${dbProd.stock_qty <= 0 ? '\n⚠️ Out of stock' : ''}`;
         await sendImageMessage(phoneNumberId, waToken, phone, imageUrl, caption);
+      } else {
+        // No image — send as text
+        const text = `📦 *${dbProd.name}*\nSKU: ${dbProd.sku || 'N/A'}\nPrice: ₹${dbProd.price}${dbProd.gst_rate > 0 ? ` + ${dbProd.gst_rate}% GST` : ''}${dbProd.stock_qty <= 0 ? '\n⚠️ Out of stock' : ''}`;
+        await sendTextMessage(phoneNumberId, waToken, phone, text);
+      }
+    }
+
+    // Fallback: if AI returned products not found in DB, send from AI response
+    if (dbProducts.length === 0) {
+      for (const product of aiResponse.products.slice(0, 5)) {
+        const imageUrl = product.image_url || (product.image_urls && product.image_urls[0]);
+        if (imageUrl) {
+          const caption = `*${product.name}*\nPrice: ₹${product.price}`;
+          await sendImageMessage(phoneNumberId, waToken, phone, imageUrl, caption);
+        }
       }
     }
   }
 
-  // Update client rank if AI detected it and it wasn't set
-  if (!client.rank && aiResponse.intent === 'buying_intent') {
-    // The AI should have asked for rank — will be captured in next message
+  // Update client rank if AI detected it from conversation
+  if (aiResponse.client_rank && aiResponse.client_rank !== client.rank) {
+    await pool.query(
+      'UPDATE clients SET rank = $1 WHERE id = $2 AND tenant_id = $3',
+      [aiResponse.client_rank, client.id, tenant.id]
+    );
   }
 
   // TODO Phase 4: handle build_quote, ask_address, send_payment actions

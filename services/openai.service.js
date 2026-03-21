@@ -60,13 +60,15 @@ ${history.map((m) => `${m.role}: ${m.message}`).join('\n')}
   "intent": "greeting|query|buying_intent|address_given|complaint|order_status",
   "reply": "Your WhatsApp reply text to the customer",
   "action": "none|send_products|build_quote|ask_address|send_payment|create_ticket",
-  "products": [{"id": 1, "name": "...", "price": 100, "image_url": "..."}],
-  "cart": [{"product_id": 1, "name": "...", "qty": 1, "price": 100}]
+  "products": [{"id": 1, "name": "...", "price": 100}],
+  "cart": [{"product_id": 1, "name": "...", "qty": 1, "price": 100}],
+  "client_rank": null
 }
 
-Only include "products" array when action is "send_products".
+Only include "products" array when action is "send_products". Use exact product IDs from the catalog.
 Only include "cart" array when action is "build_quote" or "ask_address".
-Always include "intent", "reply", and "action".`;
+Always include "intent", "reply", and "action".
+If the customer mentions their rank/designation, set "client_rank" to that value (e.g. "Captain", "Officer"). Otherwise set it to null.`;
 }
 
 /**

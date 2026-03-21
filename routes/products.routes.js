@@ -1,45 +1,46 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
 const authMiddleware = require('../middleware/auth.middleware');
 const tenantMiddleware = require('../middleware/tenant.middleware');
-const { pool } = require('../config/db');
+const productsController = require('../controllers/products.controller');
+
+const upload = multer({
+  dest: path.join(__dirname, '..', 'uploads'),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+    ];
+    if (allowed.includes(file.mimetype) || file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .xlsx and .xls files are allowed'));
+    }
+  },
+});
 
 router.use(authMiddleware);
 router.use(tenantMiddleware);
 
 // GET /api/products
-router.get('/', async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT * FROM products WHERE tenant_id = $1 AND is_active = true ORDER BY name',
-      [req.tenantId]
-    );
-    res.json({ products: result.rows });
-  } catch (err) {
-    console.error('Products list error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+router.get('/', productsController.list);
+
+// GET /api/products/:id
+router.get('/:id', productsController.getById);
 
 // POST /api/products
-router.post('/', async (req, res) => {
-  try {
-    const { sku, name, description, price, gst_rate, hsn_code, stock_qty, rank_tags, image_urls, weight_kg } = req.body;
-    const result = await pool.query(
-      `INSERT INTO products (tenant_id, sku, name, description, price, gst_rate, hsn_code, stock_qty, rank_tags, image_urls, weight_kg)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [req.tenantId, sku, name, description, price || 0, gst_rate || 0, hsn_code, stock_qty || 0, rank_tags || [], image_urls || [], weight_kg || 0]
-    );
-    res.status(201).json({ product: result.rows[0] });
-  } catch (err) {
-    console.error('Product create error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+router.post('/', productsController.create);
 
-// POST /api/products/import — placeholder for Phase 3 Excel import
-router.post('/import', async (req, res) => {
-  res.status(501).json({ message: 'Excel import coming in Phase 3' });
-});
+// PUT /api/products/:id
+router.put('/:id', productsController.update);
+
+// DELETE /api/products/:id
+router.delete('/:id', productsController.remove);
+
+// POST /api/products/import — Excel bulk import
+router.post('/import', upload.single('file'), productsController.importExcel);
 
 module.exports = router;
