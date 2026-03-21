@@ -2,6 +2,7 @@ const { pool } = require('../config/db');
 const { verifyWebhookSignature, getOrderStatus } = require('../services/cashfree.service');
 const { sendTextMessage } = require('../services/meta.service');
 const { generateOrderSummary } = require('../utils/image.utils');
+const { generateInvoice } = require('../services/invoice.service');
 
 // POST /webhook/cashfree — payment status webhook
 exports.cashfreeWebhook = async (req, res) => {
@@ -84,6 +85,24 @@ exports.cashfreeWebhook = async (req, res) => {
          VALUES ($1, $2, $3, 'system', $4, 'text')`,
         [order.client_id, order.tenant_id, order.client_phone, confirmMsg]
       );
+
+      // Update client loyalty stats
+      await pool.query(
+        `UPDATE clients SET
+          order_count = order_count + 1,
+          total_spent = total_spent + $1,
+          is_vip = CASE WHEN order_count + 1 >= 2 THEN true ELSE is_vip END
+         WHERE id = $2`,
+        [parseFloat(order.total), order.client_id]
+      );
+
+      // Auto-generate invoice
+      try {
+        await generateInvoice(order.id);
+        console.log(`[Cashfree] Invoice auto-generated for order #${order.id}`);
+      } catch (invErr) {
+        console.error('[Cashfree] Invoice generation error (non-fatal):', invErr.message);
+      }
 
       // Notify staff
       const staffResult = await pool.query(

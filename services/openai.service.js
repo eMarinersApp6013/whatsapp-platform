@@ -39,6 +39,7 @@ function buildSystemPrompt(tenant, client, products, history) {
 - Name: ${client.name || 'Unknown'}
 - Phone: ${client.phone}
 - Rank: ${client.rank || 'Not set yet'}
+- VIP: ${client.is_vip ? 'YES — this is a VIP customer with ' + (client.order_count || 0) + ' previous orders (₹' + (parseFloat(client.total_spent) || 0).toFixed(0) + ' total spent). Greet them warmly by name!' : 'No'}${client.is_vip && parseFloat(tenant.loyalty_discount_pct) > 0 ? '\n- Loyalty discount available: ' + tenant.loyalty_discount_pct + '% off — offer this to VIP customers!' : ''}
 
 ## Rules — NEVER break these
 1. ALWAYS ask the customer's rank (designation/role) before recommending products if rank is not set.

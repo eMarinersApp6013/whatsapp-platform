@@ -24,6 +24,18 @@ async function initTables() {
         wa_token TEXT,
         plan VARCHAR(50) DEFAULT 'free',
         is_active BOOLEAN DEFAULT true,
+        invoice_provider VARCHAR(20) DEFAULT 'builtin',
+        store_name VARCHAR(255),
+        store_address TEXT,
+        store_gstin VARCHAR(20),
+        store_phone VARCHAR(20),
+        bank_name VARCHAR(255),
+        bank_account VARCHAR(50),
+        bank_ifsc VARCHAR(20),
+        upi_id VARCHAR(100),
+        zoho_enabled BOOLEAN DEFAULT false,
+        cod_extra_charge NUMERIC(10,2) DEFAULT 0,
+        loyalty_discount_pct NUMERIC(5,2) DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
@@ -34,6 +46,9 @@ async function initTables() {
         name VARCHAR(255),
         rank VARCHAR(50),
         address_json JSONB,
+        order_count INTEGER DEFAULT 0,
+        total_spent NUMERIC(12,2) DEFAULT 0,
+        is_vip BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
@@ -47,6 +62,7 @@ async function initTables() {
         gst_rate NUMERIC(5,2) DEFAULT 0,
         hsn_code VARCHAR(20),
         stock_qty INTEGER DEFAULT 0,
+        stock_alert_threshold INTEGER DEFAULT 5,
         rank_tags TEXT[] DEFAULT '{}',
         image_urls TEXT[] DEFAULT '{}',
         weight_kg NUMERIC(6,3) DEFAULT 0,
@@ -74,6 +90,8 @@ async function initTables() {
         awb_number VARCHAR(100),
         courier_slip_approved BOOLEAN DEFAULT false,
         courier_partner VARCHAR(100),
+        payment_link_sent_at TIMESTAMPTZ,
+        cod_nudge_sent BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
@@ -98,6 +116,8 @@ async function initTables() {
         courier_partner VARCHAR(100),
         awb_number VARCHAR(100),
         label_url TEXT,
+        rate_comparison_json JSONB,
+        selected_by VARCHAR(255),
         approved_at TIMESTAMPTZ
       );
 
@@ -130,6 +150,56 @@ async function initTables() {
         status VARCHAR(50) DEFAULT 'OPEN',
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS invoices (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER NOT NULL REFERENCES orders(id),
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+        invoice_number VARCHAR(100) UNIQUE NOT NULL,
+        pdf_path TEXT,
+        zoho_invoice_id VARCHAR(100),
+        status VARCHAR(20) DEFAULT 'DRAFT',
+        sent_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS broadcasts (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+        template VARCHAR(255),
+        template_params JSONB,
+        audience VARCHAR(50),
+        audience_count INTEGER DEFAULT 0,
+        sent_count INTEGER DEFAULT 0,
+        failed_count INTEGER DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'PENDING',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      -- Add new columns if they don't exist (safe for existing DBs)
+      DO $$ BEGIN
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS invoice_provider VARCHAR(20) DEFAULT 'builtin';
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS store_name VARCHAR(255);
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS store_address TEXT;
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS store_gstin VARCHAR(20);
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS store_phone VARCHAR(20);
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS bank_name VARCHAR(255);
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS bank_account VARCHAR(50);
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS bank_ifsc VARCHAR(20);
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS upi_id VARCHAR(100);
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS zoho_enabled BOOLEAN DEFAULT false;
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS cod_extra_charge NUMERIC(10,2) DEFAULT 0;
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS loyalty_discount_pct NUMERIC(5,2) DEFAULT 0;
+        ALTER TABLE clients ADD COLUMN IF NOT EXISTS order_count INTEGER DEFAULT 0;
+        ALTER TABLE clients ADD COLUMN IF NOT EXISTS total_spent NUMERIC(12,2) DEFAULT 0;
+        ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_vip BOOLEAN DEFAULT false;
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_alert_threshold INTEGER DEFAULT 5;
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_link_sent_at TIMESTAMPTZ;
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS cod_nudge_sent BOOLEAN DEFAULT false;
+        ALTER TABLE courier_slips ADD COLUMN IF NOT EXISTS rate_comparison_json JSONB;
+        ALTER TABLE courier_slips ADD COLUMN IF NOT EXISTS selected_by VARCHAR(255);
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
     `);
     console.log('All database tables ready');
   } finally {
