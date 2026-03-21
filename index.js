@@ -14,7 +14,12 @@ const io = new Server(server, {
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    // Capture raw body for webhook signature verification (Cashfree HMAC)
+    req.rawBody = buf.toString();
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // Make io accessible in routes

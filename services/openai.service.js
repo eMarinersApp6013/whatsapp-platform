@@ -48,6 +48,8 @@ function buildSystemPrompt(tenant, client, products, history) {
 5. When recommending products, pick items that match the customer's rank from rank_tags.
 6. If the customer wants to buy, collect: which products, quantities, then ask for delivery address.
 7. If the customer has a complaint or wants order status, create a support ticket.
+8. When customer shares an address, set intent to "address_given" and parse the address into the "address" object.
+9. When customer confirms items and quantities, set action to "build_quote" with the cart array.
 
 ## Product Catalog (JSON)
 ${JSON.stringify(productCatalog, null, 2)}
@@ -62,11 +64,16 @@ ${history.map((m) => `${m.role}: ${m.message}`).join('\n')}
   "action": "none|send_products|build_quote|ask_address|send_payment|create_ticket",
   "products": [{"id": 1, "name": "...", "price": 100}],
   "cart": [{"product_id": 1, "name": "...", "qty": 1, "price": 100}],
-  "client_rank": null
+  "client_rank": null,
+  "address": null,
+  "raw_address": null
 }
 
 Only include "products" array when action is "send_products". Use exact product IDs from the catalog.
 Only include "cart" array when action is "build_quote" or "ask_address".
+When intent is "address_given", parse the address and set:
+  "address": {"name": "...", "flat": "...", "area": "...", "city": "...", "pincode": "123456", "state": "..."}
+  "raw_address": "the full address text as the customer typed it"
 Always include "intent", "reply", and "action".
 If the customer mentions their rank/designation, set "client_rank" to that value (e.g. "Captain", "Officer"). Otherwise set it to null.`;
 }

@@ -1,6 +1,9 @@
 const { pool } = require('../config/db');
 const { sendTextMessage, sendImageMessage, downloadMedia, markAsRead } = require('../services/meta.service');
 const { chat, transcribeAudio } = require('../services/openai.service');
+const { createOrder: createCashfreeOrder } = require('../services/cashfree.service');
+const { getZone, calculateShipping } = require('../utils/pincode.utils');
+const { generateQuotation, generateOrderSummary } = require('../utils/image.utils');
 
 // GET /webhook/meta — Meta verification
 exports.verify = (req, res) => {
@@ -253,6 +256,12 @@ async function handleStaffMessage(tenant, phone, message, phoneNumberId, waToken
  * Handle client WhatsApp messages — route through GPT-4o.
  */
 async function handleClientMessage(tenant, client, phone, messageText, phoneNumberId, waToken) {
+  // Check if client has a pending order awaiting address
+  const pendingOrder = await pool.query(
+    `SELECT * FROM orders WHERE tenant_id = $1 AND client_id = $2 AND status = 'PENDING_ADDRESS' ORDER BY created_at DESC LIMIT 1`,
+    [tenant.id, client.id]
+  );
+
   // Load full product catalog for this tenant
   const productsResult = await pool.query(
     'SELECT * FROM products WHERE tenant_id = $1 AND is_active = true ORDER BY name',
@@ -287,45 +296,6 @@ async function handleClientMessage(tenant, client, phone, messageText, phoneNumb
     await saveAssistantMessage(tenant.id, client.id, phone, aiResponse.reply);
   }
 
-  // Handle actions
-  if (aiResponse.action === 'send_products' && aiResponse.products?.length > 0) {
-    // Fetch real product data from DB for accurate images and prices
-    const productIds = aiResponse.products.map((p) => p.id).filter(Boolean);
-    let dbProducts = [];
-    if (productIds.length > 0) {
-      const placeholders = productIds.map((_, i) => `$${i + 2}`).join(',');
-      const dbResult = await pool.query(
-        `SELECT * FROM products WHERE tenant_id = $1 AND id IN (${placeholders}) AND is_active = true`,
-        [tenant.id, ...productIds]
-      );
-      dbProducts = dbResult.rows;
-    }
-
-    // Send product images with name + price caption
-    for (const dbProd of dbProducts.slice(0, 5)) {
-      const imageUrl = dbProd.image_urls && dbProd.image_urls.length > 0 ? dbProd.image_urls[0] : null;
-      if (imageUrl) {
-        const caption = `*${dbProd.name}*\nSKU: ${dbProd.sku || 'N/A'}\nPrice: ₹${dbProd.price}${dbProd.gst_rate > 0 ? ` + ${dbProd.gst_rate}% GST` : ''}${dbProd.stock_qty <= 0 ? '\n⚠️ Out of stock' : ''}`;
-        await sendImageMessage(phoneNumberId, waToken, phone, imageUrl, caption);
-      } else {
-        // No image — send as text
-        const text = `📦 *${dbProd.name}*\nSKU: ${dbProd.sku || 'N/A'}\nPrice: ₹${dbProd.price}${dbProd.gst_rate > 0 ? ` + ${dbProd.gst_rate}% GST` : ''}${dbProd.stock_qty <= 0 ? '\n⚠️ Out of stock' : ''}`;
-        await sendTextMessage(phoneNumberId, waToken, phone, text);
-      }
-    }
-
-    // Fallback: if AI returned products not found in DB, send from AI response
-    if (dbProducts.length === 0) {
-      for (const product of aiResponse.products.slice(0, 5)) {
-        const imageUrl = product.image_url || (product.image_urls && product.image_urls[0]);
-        if (imageUrl) {
-          const caption = `*${product.name}*\nPrice: ₹${product.price}`;
-          await sendImageMessage(phoneNumberId, waToken, phone, imageUrl, caption);
-        }
-      }
-    }
-  }
-
   // Update client rank if AI detected it from conversation
   if (aiResponse.client_rank && aiResponse.client_rank !== client.rank) {
     await pool.query(
@@ -334,8 +304,313 @@ async function handleClientMessage(tenant, client, phone, messageText, phoneNumb
     );
   }
 
-  // TODO Phase 4: handle build_quote, ask_address, send_payment actions
-  // TODO Phase 4: handle create_ticket action
+  // Handle actions
+  const action = aiResponse.action;
+
+  if (action === 'send_products' && aiResponse.products?.length > 0) {
+    await handleSendProducts(tenant, phone, phoneNumberId, waToken, aiResponse.products);
+  } else if (action === 'build_quote' && aiResponse.cart?.length > 0) {
+    await handleBuildQuote(tenant, client, phone, phoneNumberId, waToken, aiResponse.cart);
+  } else if (action === 'ask_address') {
+    await handleAskAddress(tenant, client, phone, phoneNumberId, waToken, aiResponse.cart, pendingOrder.rows[0]);
+  } else if (action === 'send_payment' || aiResponse.intent === 'address_given') {
+    await handleAddressAndPayment(tenant, client, phone, phoneNumberId, waToken, aiResponse, pendingOrder.rows[0]);
+  } else if (action === 'create_ticket') {
+    await handleCreateTicket(tenant, client, phone, phoneNumberId, waToken, aiResponse, messageText);
+  }
+}
+
+/**
+ * Send product images/cards to customer.
+ */
+async function handleSendProducts(tenant, phone, phoneNumberId, waToken, aiProducts) {
+  const productIds = aiProducts.map((p) => p.id).filter(Boolean);
+  let dbProducts = [];
+  if (productIds.length > 0) {
+    const placeholders = productIds.map((_, i) => `$${i + 2}`).join(',');
+    const dbResult = await pool.query(
+      `SELECT * FROM products WHERE tenant_id = $1 AND id IN (${placeholders}) AND is_active = true`,
+      [tenant.id, ...productIds]
+    );
+    dbProducts = dbResult.rows;
+  }
+
+  for (const dbProd of dbProducts.slice(0, 5)) {
+    const imageUrl = dbProd.image_urls && dbProd.image_urls.length > 0 ? dbProd.image_urls[0] : null;
+    if (imageUrl) {
+      const caption = `*${dbProd.name}*\nSKU: ${dbProd.sku || 'N/A'}\nPrice: ₹${dbProd.price}${dbProd.gst_rate > 0 ? ` + ${dbProd.gst_rate}% GST` : ''}${dbProd.stock_qty <= 0 ? '\n⚠️ Out of stock' : ''}`;
+      await sendImageMessage(phoneNumberId, waToken, phone, imageUrl, caption);
+    } else {
+      const text = `📦 *${dbProd.name}*\nSKU: ${dbProd.sku || 'N/A'}\nPrice: ₹${dbProd.price}${dbProd.gst_rate > 0 ? ` + ${dbProd.gst_rate}% GST` : ''}${dbProd.stock_qty <= 0 ? '\n⚠️ Out of stock' : ''}`;
+      await sendTextMessage(phoneNumberId, waToken, phone, text);
+    }
+  }
+
+  // Fallback if no products found in DB
+  if (dbProducts.length === 0) {
+    for (const product of aiProducts.slice(0, 5)) {
+      const imageUrl = product.image_url || (product.image_urls && product.image_urls[0]);
+      if (imageUrl) {
+        const caption = `*${product.name}*\nPrice: ₹${product.price}`;
+        await sendImageMessage(phoneNumberId, waToken, phone, imageUrl, caption);
+      }
+    }
+  }
+}
+
+/**
+ * Build quotation from cart items with prices from DB.
+ */
+async function handleBuildQuote(tenant, client, phone, phoneNumberId, waToken, cart) {
+  // Fetch real product data for cart items
+  const productIds = cart.map((c) => c.product_id).filter(Boolean);
+  let dbProducts = [];
+  if (productIds.length > 0) {
+    const placeholders = productIds.map((_, i) => `$${i + 2}`).join(',');
+    const dbResult = await pool.query(
+      `SELECT * FROM products WHERE tenant_id = $1 AND id IN (${placeholders}) AND is_active = true`,
+      [tenant.id, ...productIds]
+    );
+    dbProducts = dbResult.rows;
+  }
+  const productMap = {};
+  for (const p of dbProducts) productMap[p.id] = p;
+
+  // Calculate totals from DB prices
+  let subtotal = 0;
+  let gstAmount = 0;
+  let totalWeight = 0;
+  const resolvedItems = [];
+
+  for (const item of cart) {
+    const dbProd = productMap[item.product_id];
+    const price = dbProd ? parseFloat(dbProd.price) : parseFloat(item.price || 0);
+    const qty = item.qty || 1;
+    const gstRate = dbProd ? parseFloat(dbProd.gst_rate || 0) : 0;
+    const weight = dbProd ? parseFloat(dbProd.weight_kg || 0) : 0;
+    const lineTotal = price * qty;
+    const lineGst = lineTotal * (gstRate / 100);
+
+    subtotal += lineTotal;
+    gstAmount += lineGst;
+    totalWeight += weight * qty;
+
+    resolvedItems.push({
+      product_id: item.product_id,
+      name: dbProd ? dbProd.name : item.name,
+      qty,
+      price,
+      gst_rate: gstRate,
+      weight_kg: weight,
+      line_total: lineTotal,
+    });
+  }
+
+  const total = subtotal + gstAmount;
+
+  // Send quotation (shipping TBD until address)
+  const quoteMsg = generateQuotation({
+    items: resolvedItems,
+    subtotal,
+    gstAmount,
+    shippingCharge: null,
+    total,
+  });
+
+  const fullMsg = quoteMsg + '\n\n_Shipping will be calculated once you share your delivery address._\n\nPlease share your *full delivery address* including:\n• Name\n• Flat/House, Area\n• City\n• Pincode\n• State';
+  await sendTextMessage(phoneNumberId, waToken, phone, fullMsg);
+  await saveAssistantMessage(tenant.id, client.id, phone, fullMsg);
+
+  // Create a pending order in DB
+  const orderNumber = `NV-${Date.now().toString(36).toUpperCase()}`;
+  await pool.query(
+    `INSERT INTO orders (tenant_id, client_id, order_number, status, items_json, subtotal, gst_amount, total, payment_status)
+     VALUES ($1, $2, $3, 'PENDING_ADDRESS', $4, $5, $6, $7, 'UNPAID')`,
+    [tenant.id, client.id, orderNumber, JSON.stringify(resolvedItems), subtotal.toFixed(2), gstAmount.toFixed(2), total.toFixed(2)]
+  );
+
+  console.log(`[Order] Created ${orderNumber} for ${client.phone} — PENDING_ADDRESS`);
+}
+
+/**
+ * Ask customer for delivery address (cart may optionally be saved).
+ */
+async function handleAskAddress(tenant, client, phone, phoneNumberId, waToken, cart, existingOrder) {
+  // If cart provided and no existing pending order, create one
+  if (cart?.length > 0 && !existingOrder) {
+    await handleBuildQuote(tenant, client, phone, phoneNumberId, waToken, cart);
+    return;
+  }
+
+  // Otherwise just ask for address
+  const addressMsg = 'Please share your *full delivery address*:\n\n• Full Name\n• Flat/House No., Building, Area\n• City\n• *Pincode* (6-digit)\n• State';
+  await sendTextMessage(phoneNumberId, waToken, phone, addressMsg);
+  await saveAssistantMessage(tenant.id, client.id, phone, addressMsg);
+}
+
+/**
+ * Process address, calculate shipping, generate Cashfree payment link.
+ */
+async function handleAddressAndPayment(tenant, client, phone, phoneNumberId, waToken, aiResponse, pendingOrder) {
+  if (!pendingOrder) {
+    // No pending order — ask AI to build_quote first
+    const msg = 'I don\'t have a pending order for you yet. Could you tell me what you\'d like to order?';
+    await sendTextMessage(phoneNumberId, waToken, phone, msg);
+    await saveAssistantMessage(tenant.id, client.id, phone, msg);
+    return;
+  }
+
+  // Parse address from AI response
+  const address = aiResponse.address || {};
+  const pincode = address.pincode || extractPincode(aiResponse.reply || '') || extractPincode(aiResponse.raw_address || '');
+
+  if (!pincode || !/^\d{6}$/.test(String(pincode))) {
+    const msg = 'I need your *6-digit pincode* to calculate shipping. Could you share it?';
+    await sendTextMessage(phoneNumberId, waToken, phone, msg);
+    await saveAssistantMessage(tenant.id, client.id, phone, msg);
+    return;
+  }
+
+  // Validate pincode and get shipping zone
+  const zone = getZone(pincode);
+
+  // Look up shipping rate for this zone
+  const rateResult = await pool.query(
+    `SELECT * FROM shipping_rates WHERE tenant_id = $1 AND zone = $2 LIMIT 1`,
+    [tenant.id, zone]
+  );
+  const shippingRate = rateResult.rows[0] || null;
+
+  // Calculate total weight from order items
+  const items = pendingOrder.items_json || [];
+  let totalWeight = 0;
+  for (const item of items) {
+    totalWeight += (parseFloat(item.weight_kg) || 0.5) * (item.qty || 1);
+  }
+
+  const shippingCharge = calculateShipping(shippingRate, totalWeight);
+  const subtotal = parseFloat(pendingOrder.subtotal);
+  const gstAmount = parseFloat(pendingOrder.gst_amount);
+  const grandTotal = subtotal + gstAmount + shippingCharge;
+
+  // Build address JSON
+  const addressJson = {
+    name: address.name || client.name,
+    flat: address.flat || address.line1 || '',
+    area: address.area || address.line2 || '',
+    city: address.city || '',
+    pincode: String(pincode),
+    state: address.state || '',
+    zone,
+    raw: aiResponse.raw_address || '',
+  };
+
+  // Update order with address and shipping
+  await pool.query(
+    `UPDATE orders SET
+      address_json = $1,
+      shipping_charge = $2,
+      total = $3,
+      status = 'PENDING_PAYMENT'
+     WHERE id = $4`,
+    [JSON.stringify(addressJson), shippingCharge.toFixed(2), grandTotal.toFixed(2), pendingOrder.id]
+  );
+
+  // Also update client address
+  await pool.query(
+    'UPDATE clients SET address_json = $1 WHERE id = $2 AND tenant_id = $3',
+    [JSON.stringify(addressJson), client.id, tenant.id]
+  );
+
+  // Send final quotation with shipping
+  const finalQuote = generateQuotation({
+    items,
+    subtotal,
+    gstAmount,
+    shippingCharge,
+    shippingZone: zone,
+    total: grandTotal,
+  });
+
+  await sendTextMessage(phoneNumberId, waToken, phone, finalQuote);
+  await saveAssistantMessage(tenant.id, client.id, phone, finalQuote);
+
+  // Generate Cashfree payment link
+  try {
+    const cfResult = await createCashfreeOrder({
+      orderId: pendingOrder.order_number,
+      orderAmount: grandTotal,
+      customerPhone: phone,
+      customerName: client.name,
+    });
+
+    // Save Cashfree order ID
+    await pool.query(
+      'UPDATE orders SET cashfree_order_id = $1 WHERE id = $2',
+      [cfResult.order_id || cfResult.cf_order_id, pendingOrder.id]
+    );
+
+    const paymentMsg = `💳 *Pay Online — ₹${grandTotal.toFixed(2)}*\n\n${cfResult.payment_link}\n\nPay securely via UPI, cards, or net banking.\n\n_Prepaid orders get priority shipping!_ 🚀`;
+    await sendTextMessage(phoneNumberId, waToken, phone, paymentMsg);
+    await saveAssistantMessage(tenant.id, client.id, phone, paymentMsg);
+
+    console.log(`[Payment] Cashfree link sent for order ${pendingOrder.order_number}: ${cfResult.payment_link}`);
+  } catch (err) {
+    console.error('Cashfree payment link error:', err);
+    const errMsg = 'Sorry, I couldn\'t generate the payment link right now. Our team will send it to you shortly.';
+    await sendTextMessage(phoneNumberId, waToken, phone, errMsg);
+    await saveAssistantMessage(tenant.id, client.id, phone, errMsg);
+
+    // Notify staff about the failure
+    const staffResult = await pool.query(
+      'SELECT phone FROM staff_numbers WHERE tenant_id = $1 AND is_active = true',
+      [tenant.id]
+    );
+    for (const staff of staffResult.rows) {
+      await sendTextMessage(phoneNumberId, waToken, staff.phone,
+        `⚠️ Payment link failed for Order #${pendingOrder.id} (${pendingOrder.order_number})\nClient: ${client.name} (${phone})\nTotal: ₹${grandTotal.toFixed(2)}\nError: ${err.message}`
+      );
+    }
+  }
+}
+
+/**
+ * Create a support ticket.
+ */
+async function handleCreateTicket(tenant, client, phone, phoneNumberId, waToken, aiResponse, messageText) {
+  const issueType = aiResponse.intent === 'complaint' ? 'complaint' : aiResponse.intent === 'order_status' ? 'order_status' : 'general';
+
+  // Try to link to most recent order
+  const recentOrder = await pool.query(
+    'SELECT id FROM orders WHERE tenant_id = $1 AND client_id = $2 ORDER BY created_at DESC LIMIT 1',
+    [tenant.id, client.id]
+  );
+  const orderId = recentOrder.rows[0]?.id || null;
+
+  await pool.query(
+    `INSERT INTO support_tickets (order_id, client_id, tenant_id, issue_type, description, status)
+     VALUES ($1, $2, $3, $4, $5, 'OPEN')`,
+    [orderId, client.id, tenant.id, issueType, messageText]
+  );
+
+  // Notify staff
+  const staffResult = await pool.query(
+    'SELECT phone FROM staff_numbers WHERE tenant_id = $1 AND is_active = true',
+    [tenant.id]
+  );
+  for (const staff of staffResult.rows) {
+    await sendTextMessage(phoneNumberId, waToken, staff.phone,
+      `🎫 *New Support Ticket*\nClient: ${client.name} (${phone})\nType: ${issueType}\nMessage: ${messageText.slice(0, 200)}`
+    );
+  }
+}
+
+/**
+ * Extract a 6-digit pincode from text.
+ */
+function extractPincode(text) {
+  const match = String(text).match(/\b(\d{6})\b/);
+  return match ? match[1] : null;
 }
 
 /**
