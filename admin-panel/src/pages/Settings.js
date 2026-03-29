@@ -55,6 +55,9 @@ export default function Settings() {
   const [saving,   setSaving]   = useState(false);
   const [saved,    setSaved]    = useState(false);
   const [error,    setError]    = useState('');
+  const [testPhone, setTestPhone] = useState('');
+  const [testing,   setTesting]   = useState(false);
+  const [testResult, setTestResult] = useState('');
 
   useEffect(() => {
     api.get('/api/settings/meta')
@@ -157,6 +160,61 @@ export default function Settings() {
           </button>
         </div>
       </form>
+
+      {/* Test Connection */}
+      <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.1)', marginTop: 24 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600, color: '#2d3748', marginBottom: 8 }}>Test WhatsApp Connection</h2>
+        <p style={{ fontSize: 13, color: '#718096', marginBottom: 16 }}>Send a test message to verify your Meta credentials are working.</p>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#2d3748', marginBottom: 6 }}>
+              Recipient Phone (with country code)
+            </label>
+            <input
+              type="tel"
+              value={testPhone}
+              onChange={e => setTestPhone(e.target.value)}
+              placeholder="919876543210"
+              style={{ width: '100%', padding: '10px 14px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14 }}
+            />
+          </div>
+          <button
+            onClick={async () => {
+              setTesting(true); setTestResult('');
+              try {
+                await api.post('/api/settings/test-message', { phone: testPhone });
+                setTestResult('success');
+              } catch (e) {
+                setTestResult(e.response?.data?.error || e.message || 'Failed');
+              } finally { setTesting(false); }
+            }}
+            disabled={testing || !testPhone}
+            style={{
+              padding: '10px 24px',
+              background: testing ? '#a0aec0' : '#4f46e5',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: testing || !testPhone ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {testing ? 'Sending...' : 'Send Test Message'}
+          </button>
+        </div>
+        {testResult === 'success' && (
+          <div style={{ marginTop: 12, padding: '10px 14px', background: '#f0fff4', border: '1px solid #9ae6b4', borderRadius: 8, color: '#276749', fontSize: 13 }}>
+            ✓ Test message sent successfully! Check your WhatsApp.
+          </div>
+        )}
+        {testResult && testResult !== 'success' && (
+          <div style={{ marginTop: 12, padding: '10px 14px', background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, color: '#c53030', fontSize: 13 }}>
+            Error: {testResult}
+          </div>
+        )}
+      </div>
 
       {/* How to get credentials */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.1)', marginTop: 24 }}>

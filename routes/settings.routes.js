@@ -142,7 +142,77 @@ router.post('/meta', async (req, res) => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// (Existing settings routes can be added below)
+// POST /api/settings/test-message
+// Sends a test WhatsApp message to verify credentials
 // ─────────────────────────────────────────────────────────────────────────────
+router.post('/test-message', async (req, res) => {
+  const tenantId = getTenantId(req)
+  const { phone } = req.body
+
+  if (!phone) return res.status(400).json({ ok: false, error: 'phone is required' })
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT meta_whatsapp_token, meta_phone_number_id FROM tenants WHERE id = $1',
+      [tenantId]
+    )
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Tenant not found' })
+
+    const { meta_whatsapp_token: token, meta_phone_number_id: phoneNumberId } = rows[0]
+    if (!token || !phoneNumberId) {
+      return res.status(400).json({ ok: false, error: 'Meta credentials not configured. Save your settings first.' })
+    }
+
+    const axios = require('axios')
+    const to = phone.replace(/\D/g, '')
+    const response = await axios.post(
+      `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'text',
+        text: { body: '✅ NavyStore WhatsApp bot is connected and working! This is a test message.' }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    return res.json({ ok: true, message: 'Test message sent', wa_id: response.data?.messages?.[0]?.id })
+  } catch (err) {
+    const errMsg = err.response?.data?.error?.message || err.message || 'Failed to send'
+    console.error('[settings/test-message]', errMsg)
+    return res.status(500).json({ ok: false, error: errMsg })
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/settings/shipping-rates
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/shipping-rates', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM shipping_rates WHERE tenant_id = 1 ORDER BY zone')
+    return res.json({ ok: true, data: rows })
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+router.put('/shipping-rates/:id', async (req, res) => {
+  try {
+    const { zone, states, rate_500g, rate_1kg, rate_2kg, per_kg_extra } = req.body
+    const { rows } = await pool.query(
+      `UPDATE shipping_rates SET zone=$1, states=$2, rate_500g=$3, rate_1kg=$4, rate_2kg=$5, per_kg_extra=$6
+       WHERE id=$7 AND tenant_id=1 RETURNING *`,
+      [zone, states, rate_500g, rate_1kg, rate_2kg, per_kg_extra, req.params.id]
+    )
+    return res.json({ ok: true, data: rows[0] })
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message })
+  }
+})
 
 module.exports = router

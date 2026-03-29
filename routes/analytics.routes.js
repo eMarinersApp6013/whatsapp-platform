@@ -8,7 +8,7 @@ router.get('/overview', async (req, res) => {
   try {
     const { tenant_id = 1, days = 30 } = req.query;
 
-    const [orders, customers, messages, revenue] = await Promise.all([
+    const [orders, customers, revenue] = await Promise.all([
       pool.query(
         `SELECT DATE(created_at) as date, COUNT(*) as count
          FROM orders WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '${parseInt(days)} days'
@@ -22,13 +22,6 @@ router.get('/overview', async (req, res) => {
         [tenant_id]
       ),
       pool.query(
-        `SELECT DATE(m.created_at) as date, COUNT(*) as count
-         FROM messages m JOIN conversations c ON m.conversation_id = c.id
-         WHERE c.tenant_id = $1 AND m.created_at > NOW() - INTERVAL '${parseInt(days)} days'
-         GROUP BY DATE(m.created_at) ORDER BY date`,
-        [tenant_id]
-      ),
-      pool.query(
         `SELECT DATE(created_at) as date, COALESCE(SUM(total_amount),0) as total
          FROM orders WHERE tenant_id = $1 AND status != 'cancelled'
          AND created_at > NOW() - INTERVAL '${parseInt(days)} days'
@@ -36,6 +29,16 @@ router.get('/overview', async (req, res) => {
         [tenant_id]
       ),
     ]);
+    let messages = { rows: [] };
+    try {
+      messages = await pool.query(
+        `SELECT DATE(m.created_at) as date, COUNT(*) as count
+         FROM messages m JOIN conversations c ON m.conversation_id = c.id
+         WHERE c.tenant_id = $1 AND m.created_at > NOW() - INTERVAL '${parseInt(days)} days'
+         GROUP BY DATE(m.created_at) ORDER BY date`,
+        [tenant_id]
+      );
+    } catch (_) {}
 
     return res.json({
       success: true,

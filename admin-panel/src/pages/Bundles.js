@@ -254,7 +254,7 @@ export default function Bundles() {
         api.get('/api/products/catalog'),
       ]);
       setBundles(bundleRes.data?.bundles || bundleRes.data || []);
-      setProducts(productRes.data?.products || productRes.data || []);
+      setProducts(productRes.data?.data || productRes.data?.products || (Array.isArray(productRes.data) ? productRes.data : []));
     } catch (err) {
       setBundles([]);
       setProducts([]);

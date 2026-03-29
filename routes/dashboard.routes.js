@@ -8,14 +8,19 @@ router.get('/stats', async (req, res) => {
   try {
     const tenant_id = req.query.tenant_id || 1;
 
-    const [customers, conversations, orders, messages] = await Promise.all([
+    const [customers, conversations, orders] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM clients WHERE tenant_id = $1', [tenant_id]),
       pool.query('SELECT COUNT(*) FROM conversations WHERE tenant_id = $1', [tenant_id]),
       pool.query('SELECT COUNT(*) FROM orders WHERE tenant_id = $1', [tenant_id]),
-      pool.query(`SELECT COUNT(*) FROM messages m
-        JOIN conversations c ON m.conversation_id = c.id
-        WHERE c.tenant_id = $1 AND m.created_at > NOW() - INTERVAL '24 hours'`, [tenant_id]),
     ]);
+    // messages may not exist yet — safe fallback
+    let messages = { rows: [{ count: '0' }] };
+    try {
+      messages = await pool.query(
+        `SELECT COUNT(*) FROM messages m JOIN conversations c ON m.conversation_id = c.id WHERE c.tenant_id = $1 AND m.created_at > NOW() - INTERVAL '24 hours'`,
+        [tenant_id]
+      );
+    } catch (_) {}
 
     const openConvs  = await pool.query("SELECT COUNT(*) FROM conversations WHERE tenant_id = $1 AND status = 'open'", [tenant_id]);
     const pendOrders = await pool.query("SELECT COUNT(*) FROM orders WHERE tenant_id = $1 AND status = 'pending'", [tenant_id]);
