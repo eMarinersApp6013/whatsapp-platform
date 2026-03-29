@@ -15,13 +15,17 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone and password required' });
     }
 
-    // Clean phone — strip +91 prefix for DB lookup
-    const cleanPhone = phone.replace(/^\+91/, '').replace(/\D/g, '');
+    // Clean phone — try both with and without 91 country code
+    const cleanPhone = phone.replace(/^\+/, '').replace(/\D/g, '');
+    const phoneWithout91 = cleanPhone.replace(/^91(\d{10})$/, '$1');
+    const phoneWith91    = cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone;
 
-    // Check staff_numbers table
+    // Check staff_numbers table (try both formats)
     const { rows } = await pool.query(
-      'SELECT s.*, t.name as tenant_name, t.admin_password FROM staff_numbers s JOIN tenants t ON s.tenant_id = t.id WHERE s.phone = $1 AND s.is_active = true',
-      [cleanPhone]
+      `SELECT s.*, t.name as tenant_name, t.admin_password
+       FROM staff_numbers s JOIN tenants t ON s.tenant_id = t.id
+       WHERE (s.phone = $1 OR s.phone = $2 OR s.phone = $3) AND s.is_active = true`,
+      [cleanPhone, phoneWithout91, phoneWith91]
     );
 
     if (!rows.length) {
