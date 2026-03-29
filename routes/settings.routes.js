@@ -164,7 +164,9 @@ router.post('/test-message', async (req, res) => {
     }
 
     const axios = require('axios')
-    const to = phone.replace(/\D/g, '')
+    let to = phone.replace(/\D/g, '')
+    // Auto-add India country code if 10 digits
+    if (to.length === 10) to = '91' + to
     const response = await axios.post(
       `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
       {
