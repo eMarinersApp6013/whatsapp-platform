@@ -17,7 +17,7 @@ router.get('/overview', async (req, res) => {
       ),
       pool.query(
         `SELECT DATE(created_at) as date, COUNT(*) as count
-         FROM customers WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '${parseInt(days)} days'
+         FROM clients WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '${parseInt(days)} days'
          GROUP BY DATE(created_at) ORDER BY date`,
         [tenant_id]
       ),

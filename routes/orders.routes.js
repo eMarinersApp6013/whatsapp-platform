@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
     const { rows } = await pool.query(
       `SELECT o.*, c.name as customer_name, c.phone as customer_phone
        FROM orders o
-       LEFT JOIN customers c ON o.customer_id = c.id
+       LEFT JOIN clients c ON o.client_id = c.id
        WHERE ${where}
        ORDER BY o.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -45,7 +45,7 @@ router.get('/:id', async (req, res) => {
     const { rows } = await pool.query(
       `SELECT o.*, c.name as customer_name, c.phone as customer_phone
        FROM orders o
-       LEFT JOIN customers c ON o.customer_id = c.id
+       LEFT JOIN clients c ON o.client_id = c.id
        WHERE o.id = $1`, [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ success: false, message: 'Order not found' });

@@ -9,7 +9,7 @@ router.get('/stats', async (req, res) => {
     const tenant_id = req.query.tenant_id || 1;
 
     const [customers, conversations, orders, messages] = await Promise.all([
-      pool.query('SELECT COUNT(*) FROM customers WHERE tenant_id = $1', [tenant_id]),
+      pool.query('SELECT COUNT(*) FROM clients WHERE tenant_id = $1', [tenant_id]),
       pool.query('SELECT COUNT(*) FROM conversations WHERE tenant_id = $1', [tenant_id]),
       pool.query('SELECT COUNT(*) FROM orders WHERE tenant_id = $1', [tenant_id]),
       pool.query(`SELECT COUNT(*) FROM messages m
