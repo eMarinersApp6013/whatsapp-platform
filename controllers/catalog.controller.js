@@ -51,12 +51,10 @@ exports.getHome = async (req, res) => {
 
     const [topSellers, newArrivals, bundles] = await Promise.all([
       pool.query(`
-        SELECT p.*, COALESCE(SUM(1), 0) AS order_count
+        SELECT p.*, 0 AS order_count
         FROM products p
-        LEFT JOIN orders o ON o.tenant_id=p.tenant_id
-          AND o.items @> jsonb_build_array(jsonb_build_object('product_id', p.id))
         WHERE p.tenant_id=$1 AND p.is_active=true
-        GROUP BY p.id ORDER BY order_count DESC LIMIT 6
+        ORDER BY p.created_at DESC LIMIT 6
       `, [TENANT_ID]),
       pool.query(
         'SELECT * FROM products WHERE tenant_id=$1 AND is_active=true ORDER BY created_at DESC LIMIT 6',

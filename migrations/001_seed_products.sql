@@ -68,7 +68,7 @@ INSERT INTO products (tenant_id, sku, name, description, price, compare_price, s
  0.3, ARRAY['all','gift','casual'], true,
  '{"is_customizable":true,"fields":[{"name":"your_name","label":"Name to Embroider","type":"text","required":true},{"name":"rank","label":"Rank (optional)","type":"text","required":false},{"name":"logo","label":"Logo Symbol","type":"select","options":["⚓ Anchor","🔱 Trident","⭐ Star","🦅 Eagle","🛳️ Ship","📤 Upload My Logo"]},{"name":"color","label":"T-Shirt Color","type":"select","options":["White","Black","Navy Blue","Dark Gray"]},{"name":"placement","label":"Embroidery Placement","type":"select","options":["Front Center","Back Full","Left Chest","Right Sleeve"]}],"production_days":"5-7"}'::jsonb)
 
-ON CONFLICT (sku) DO NOTHING;
+ON CONFLICT (tenant_id, sku) DO NOTHING;
 
 -- ── Bundles ──────────────────────────────────────────────────────────────────
 INSERT INTO bundles (tenant_id, name, description, product_ids, bundle_price, savings, is_active)
