@@ -79,22 +79,43 @@ export default function Conversations() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── Socket.io ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    socketRef.current = io(BASE_URL, { transports: ['websocket', 'polling'] });
+  // ── Socket.io (create ONCE, use ref for selected) ─────────────────────────
+  const selectedRef = useRef(selected);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
 
-    socketRef.current.on('new_message', (msg) => {
-      if (selected && msg.conversation_id === selected.id) {
-        setMessages(prev => [...prev, msg]);
+  useEffect(() => {
+    const socket = io(BASE_URL, { transports: ['websocket', 'polling'] });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      if (selectedRef.current) {
+        socket.emit('join_conversation', selectedRef.current.id);
       }
-      loadConvs();
     });
 
-    return () => socketRef.current?.disconnect();
-  }, [selected, loadConvs]);
+    socket.on('new_message', (msg) => {
+      const cur = selectedRef.current;
+      if (cur && msg.conversation_id === cur.id) {
+        setMessages(prev => {
+          // Avoid duplicate messages
+          if (prev.some(m => m.id === msg.id && msg.id)) return prev;
+          return [...prev, { ...msg, direction: msg.direction || 'inbound' }];
+        });
+      }
+      // Refresh conversation list
+      setConvs(prev => prev.map(c =>
+        c.id === msg.conversation_id
+          ? { ...c, last_message: msg.content, last_message_at: msg.created_at }
+          : c
+      ));
+    });
 
+    return () => socket.disconnect();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Join room when conversation selected
   useEffect(() => {
-    if (selected && socketRef.current) {
+    if (selected && socketRef.current?.connected) {
       socketRef.current.emit('join_conversation', selected.id);
     }
   }, [selected]);
@@ -302,20 +323,27 @@ export default function Conversations() {
 
             {/* Messages */}
             <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {messages.length === 0 && (
+                <div style={{ textAlign: 'center', color: '#a0aec0', fontSize: 13, marginTop: 40 }}>
+                  No messages yet. Waiting for customer to message...
+                </div>
+              )}
               {messages.map((msg, i) => {
-                const isOut = msg.direction === 'outbound';
+                const isOut = msg.direction === 'outbound' || msg.direction === 'out';
                 return (
                   <div key={i} style={{ display: 'flex', justifyContent: isOut ? 'flex-end' : 'flex-start' }}>
                     <div style={{
                       maxWidth: '70%',
                       padding: '10px 14px',
                       borderRadius: isOut ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                      background: isOut ? '#25d366' : '#fff',
-                      color: isOut ? '#fff' : '#2d3748',
+                      background: isOut ? '#25d366' : '#e8f4fd',
+                      color: isOut ? '#fff' : '#1a202c',
                       fontSize: 13,
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
                       wordBreak: 'break-word',
+                      border: isOut ? 'none' : '1px solid #bee3f8',
                     }}>
+                      {!isOut && <div style={{ fontSize: 10, fontWeight: 600, color: '#3182ce', marginBottom: 3 }}>Customer</div>}
                       <div>{msg.content}</div>
                       <div style={{ fontSize: 10, marginTop: 4, opacity: 0.7, textAlign: 'right' }}>
                         {timeAgo(msg.created_at)}
