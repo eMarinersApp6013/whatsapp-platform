@@ -99,13 +99,18 @@ async function processMessage(phone, content, msgType, mediaUrl, app) {
     }
 
     // 5. Skip AI if this is a staff number
-    const staffNumbers = (process.env.STAFF_NUMBERS || '').split(',').map(s => s.replace(/\D/g,'').trim())
-    if (staffNumbers.some(s => phone.includes(s))) return
+    const staffEnv = process.env.STAFF_NUMBERS || ''
+    const staffNumbers = staffEnv ? staffEnv.split(',').map(s => s.replace(/\D/g,'').trim()).filter(Boolean) : []
+    if (staffNumbers.length && staffNumbers.some(s => s && phone.includes(s))) return
 
-    // 6. Check if Meta is configured for sending
+    // 6. Check if Meta is configured for sending (DB first, fallback to env)
     const { rows: tenantRows } = await pool.query('SELECT * FROM tenants WHERE id=$1', [TENANT_ID])
     const tenant = tenantRows[0]
-    if (!tenant?.meta_whatsapp_token || tenant.meta_whatsapp_token === 'FILL_LATER') return
+    const waToken = tenant?.meta_whatsapp_token || process.env.META_WHATSAPP_TOKEN || ''
+    const phoneId = tenant?.meta_phone_number_id || process.env.META_PHONE_NUMBER_ID || ''
+    if (!waToken || waToken === 'FILL_LATER') return
+    // Ensure metaSvc uses current credentials
+    metaSvc.configure(waToken, phoneId)
 
     // 7. Handle special commands
     const cmd = content.trim().toUpperCase()

@@ -3,8 +3,17 @@ const axios = require('axios')
 
 const BASE = 'https://graph.facebook.com/v19.0'
 
-function getToken() { return process.env.META_WHATSAPP_TOKEN || '' }
-function getPhoneId() { return process.env.META_PHONE_NUMBER_ID || '' }
+let _token = ''
+let _phoneId = ''
+
+// Called by webhook to use DB credentials (overrides env vars)
+exports.configure = (token, phoneId) => {
+  if (token)   _token   = token
+  if (phoneId) _phoneId = phoneId
+}
+
+function getToken()   { return _token   || process.env.META_WHATSAPP_TOKEN   || '' }
+function getPhoneId() { return _phoneId || process.env.META_PHONE_NUMBER_ID  || '' }
 
 async function send(payload) {
   const token = getToken()
