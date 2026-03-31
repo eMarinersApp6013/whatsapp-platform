@@ -111,7 +111,7 @@ export default function Conversations() {
     });
 
     return () => socket.disconnect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line
 
   // Join room when conversation selected
   useEffect(() => {
