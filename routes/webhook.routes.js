@@ -73,8 +73,8 @@ async function processMessage(phone, content, msgType, mediaUrl, app) {
     let convId
     if (!convRows.length) {
       const { rows } = await pool.query(
-        'INSERT INTO conversations (tenant_id, client_id, status, last_message, last_message_at) VALUES ($1,$2,$3,$4,NOW()) RETURNING *',
-        [TENANT_ID, client.id, 'open', content]
+        'INSERT INTO conversations (tenant_id, client_id, phone, status, last_message, last_message_at) VALUES ($1,$2,$3,$4,$5,NOW()) RETURNING *',
+        [TENANT_ID, client.id, phone, 'open', content]
       )
       convId = rows[0].id
     } else {
