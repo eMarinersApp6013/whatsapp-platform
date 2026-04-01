@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import api from '../utils/api';
+
+// ─── WhatsApp Config ──────────────────────────────────────────────────────────
 
 const FIELDS = [
   { key: 'meta_app_id',           label: 'Meta App ID',           type: 'text',     help: 'From Meta Developer Dashboard' },
@@ -10,7 +12,7 @@ const FIELDS = [
   { key: 'admin_password',        label: 'Admin Login Password',  type: 'password', help: 'Password to login to this panel' },
 ];
 
-function Input({ field, value, onChange, show, onToggle }) {
+function CredentialInput({ field, value, onChange, show, onToggle }) {
   return (
     <div style={{ marginBottom: 20 }}>
       <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#2d3748', marginBottom: 6 }}>
@@ -30,6 +32,7 @@ function Input({ field, value, onChange, show, onToggle }) {
             fontSize: 14,
             outline: 'none',
             fontFamily: 'monospace',
+            boxSizing: 'border-box',
           }}
         />
         {field.type === 'password' && (
@@ -47,49 +50,35 @@ function Input({ field, value, onChange, show, onToggle }) {
   );
 }
 
-export default function Settings() {
-  const [form,     setForm]    = useState({});
-  const [original, setOriginal] = useState({});
-  const [showPass, setShowPass] = useState({});
-  const [loading,  setLoading]  = useState(true);
-  const [saving,   setSaving]   = useState(false);
-  const [saved,    setSaved]    = useState(false);
-  const [error,    setError]    = useState('');
+function WhatsAppConfigTab() {
+  const [form,      setForm]      = useState({});
+  const [showPass,  setShowPass]  = useState({});
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [saved,     setSaved]     = useState(false);
+  const [error,     setError]     = useState('');
   const [testPhone, setTestPhone] = useState('');
   const [testing,   setTesting]   = useState(false);
-  const [testResult, setTestResult] = useState('');
+  const [testResult,setTestResult]= useState('');
 
   useEffect(() => {
     api.get('/api/settings/meta')
-      .then(r => {
-        const d = r.data.data || {};
-        setForm(d);
-        setOriginal(d);
-      })
+      .then(r => setForm(r.data.data || {}))
       .catch(e => setError(e.response?.data?.message || e.message))
       .finally(() => setLoading(false));
   }, []);
 
-  const handleChange = (key, val) => {
-    setForm(prev => ({ ...prev, [key]: val }));
-  };
-
-  const handleToggleShow = (key) => {
-    setShowPass(prev => ({ ...prev, [key]: !prev[key] }));
-  };
+  const handleChange = (key, val) => setForm(prev => ({ ...prev, [key]: val }));
+  const handleToggleShow = (key) => setShowPass(prev => ({ ...prev, [key]: !prev[key] }));
 
   const handleSave = async (e) => {
     e.preventDefault();
-    setSaving(true);
-    setError('');
+    setSaving(true); setError('');
     try {
-      // Only send fields that have changed (and don't contain ****)
       const payload = {};
       FIELDS.forEach(f => {
         const v = form[f.key] || '';
-        if (v && !v.includes('****')) {
-          payload[f.key] = v;
-        }
+        if (v && !v.includes('****')) payload[f.key] = v;
       });
       await api.post('/api/settings/meta', payload);
       setSaved(true);
@@ -104,12 +93,7 @@ export default function Settings() {
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#718096' }}>Loading settings...</div>;
 
   return (
-    <div style={{ maxWidth: 680 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: '#2d3748', marginBottom: 8 }}>Settings</h1>
-      <p style={{ color: '#718096', marginBottom: 32, fontSize: 14 }}>
-        Configure your Meta WhatsApp Business API credentials. These are stored securely per tenant.
-      </p>
-
+    <>
       {/* Webhook URL info */}
       <div style={{ background: '#ebf8ff', border: '1px solid #90cdf4', borderRadius: 10, padding: 16, marginBottom: 32 }}>
         <p style={{ fontWeight: 600, color: '#2b6cb0', fontSize: 13, marginBottom: 6 }}>Webhook URL to set in Meta Dashboard:</p>
@@ -124,9 +108,8 @@ export default function Settings() {
       <form onSubmit={handleSave}>
         <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
           <h2 style={{ fontSize: 15, fontWeight: 600, color: '#2d3748', marginBottom: 20 }}>Meta WhatsApp API Credentials</h2>
-
           {FIELDS.map(field => (
-            <Input
+            <CredentialInput
               key={field.key}
               field={field}
               value={form[field.key]}
@@ -135,13 +118,11 @@ export default function Settings() {
               onToggle={() => handleToggleShow(field.key)}
             />
           ))}
-
           {error && (
             <div style={{ padding: '10px 14px', background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, color: '#c53030', fontSize: 13, marginBottom: 16 }}>
               {error}
             </div>
           )}
-
           <button
             type="submit"
             disabled={saving}
@@ -175,7 +156,7 @@ export default function Settings() {
               value={testPhone}
               onChange={e => setTestPhone(e.target.value)}
               placeholder="919876543210"
-              style={{ width: '100%', padding: '10px 14px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14 }}
+              style={{ width: '100%', padding: '10px 14px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }}
             />
           </div>
           <button
@@ -229,6 +210,534 @@ export default function Settings() {
           <li>Subscribe to <strong>messages</strong> webhook field</li>
         </ol>
       </div>
+    </>
+  );
+}
+
+// ─── Canned Responses Tab ─────────────────────────────────────────────────────
+
+const CANNED_CATEGORIES = ['general', 'greetings', 'support', 'info'];
+
+const emptyCannedForm = { shortcut: '', title: '', content: '', category: 'general' };
+
+function CannedResponsesTab() {
+  const [items,      setItems]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState('');
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [addForm,    setAddForm]    = useState(emptyCannedForm);
+  const [addSaving,  setAddSaving]  = useState(false);
+  const [addError,   setAddError]   = useState('');
+  const [editId,     setEditId]     = useState(null);
+  const [editForm,   setEditForm]   = useState(emptyCannedForm);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError,  setEditError]  = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.get('/api/chat/canned')
+      .then(r => setItems(r.data.data || r.data || []))
+      .catch(e => setError(e.response?.data?.message || e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (!addForm.title || !addForm.content) { setAddError('Title and content are required.'); return; }
+    setAddSaving(true); setAddError('');
+    try {
+      await api.post('/api/chat/canned', addForm);
+      setAddForm(emptyCannedForm);
+      setShowAdd(false);
+      load();
+    } catch (e) {
+      setAddError(e.response?.data?.message || 'Failed to save.');
+    } finally { setAddSaving(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this canned response?')) return;
+    try {
+      await api.delete(`/api/chat/canned/${id}`);
+      load();
+    } catch (e) {
+      alert(e.response?.data?.message || 'Delete failed.');
+    }
+  };
+
+  const startEdit = (item) => {
+    setEditId(item._id || item.id);
+    setEditForm({
+      shortcut: item.shortcut || '',
+      title:    item.title    || '',
+      content:  item.content  || '',
+      category: item.category || 'general',
+    });
+    setEditError('');
+    setShowAdd(false);
+  };
+
+  const handleEditSave = async (e) => {
+    e.preventDefault();
+    if (!editForm.title || !editForm.content) { setEditError('Title and content are required.'); return; }
+    setEditSaving(true); setEditError('');
+    try {
+      await api.put(`/api/chat/canned/${editId}`, editForm);
+      setEditId(null);
+      load();
+    } catch (e) {
+      setEditError(e.response?.data?.message || 'Failed to save.');
+    } finally { setEditSaving(false); }
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '9px 12px',
+    border: '1px solid #e2e8f0',
+    borderRadius: 7,
+    fontSize: 13,
+    outline: 'none',
+    boxSizing: 'border-box',
+  };
+
+  const labelStyle = { display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 };
+
+  return (
+    <div>
+      {/* Header row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: '#2d3748', margin: 0 }}>Canned Responses</h2>
+          <p style={{ fontSize: 13, color: '#718096', marginTop: 4 }}>Pre-written replies agents can insert quickly during chats.</p>
+        </div>
+        {!showAdd && (
+          <button
+            onClick={() => { setShowAdd(true); setEditId(null); setAddForm(emptyCannedForm); setAddError(''); }}
+            style={{ padding: '9px 20px', background: '#25d366', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+          >
+            + Add New
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div style={{ padding: '10px 14px', background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, color: '#c53030', fontSize: 13, marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Add form */}
+      {showAdd && (
+        <div style={{ background: '#f7fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 20, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: '#2d3748', marginBottom: 16 }}>New Canned Response</h3>
+          <form onSubmit={handleAdd}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
+              <div>
+                <label style={labelStyle}>Shortcut</label>
+                <input style={inputStyle} placeholder="/hello" value={addForm.shortcut} onChange={e => setAddForm(p => ({ ...p, shortcut: e.target.value }))} />
+              </div>
+              <div>
+                <label style={labelStyle}>Category</label>
+                <select style={inputStyle} value={addForm.category} onChange={e => setAddForm(p => ({ ...p, category: e.target.value }))}>
+                  {CANNED_CATEGORIES.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Title <span style={{ color: '#e53e3e' }}>*</span></label>
+              <input style={inputStyle} placeholder="e.g. Welcome Message" value={addForm.title} onChange={e => setAddForm(p => ({ ...p, title: e.target.value }))} />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Content <span style={{ color: '#e53e3e' }}>*</span></label>
+              <textarea
+                style={{ ...inputStyle, resize: 'vertical', minHeight: 90 }}
+                placeholder="Type the response text here..."
+                value={addForm.content}
+                onChange={e => setAddForm(p => ({ ...p, content: e.target.value }))}
+              />
+            </div>
+            {addError && <p style={{ fontSize: 12, color: '#c53030', marginBottom: 10 }}>{addError}</p>}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="submit"
+                disabled={addSaving}
+                style={{ padding: '9px 22px', background: addSaving ? '#a0aec0' : '#25d366', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: addSaving ? 'not-allowed' : 'pointer' }}
+              >
+                {addSaving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowAdd(false); setAddError(''); }}
+                style={{ padding: '9px 22px', background: '#edf2f7', color: '#4a5568', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Table */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: '#a0aec0' }}>Loading...</div>
+      ) : items.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 48, color: '#a0aec0', background: '#fff', borderRadius: 12, border: '1px dashed #e2e8f0' }}>
+          No canned responses yet. Click "Add New" to create one.
+        </div>
+      ) : (
+        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f7fafc', borderBottom: '1px solid #e2e8f0' }}>
+                {['Shortcut', 'Title', 'Category', 'Content', 'Actions'].map(h => (
+                  <th key={h} style={{ padding: '11px 16px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: '#4a5568', letterSpacing: 0.4 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, idx) => {
+                const id = item._id || item.id;
+                const isEditing = editId === id;
+                return (
+                  <React.Fragment key={id}>
+                    <tr
+                      style={{
+                        borderBottom: '1px solid #f0f4f8',
+                        background: isEditing ? '#f0fff4' : idx % 2 === 0 ? '#fff' : '#fcfcfd',
+                        cursor: isEditing ? 'default' : 'pointer',
+                        transition: 'background 0.15s',
+                      }}
+                      onClick={() => { if (!isEditing) startEdit(item); }}
+                    >
+                      <td style={{ padding: '11px 16px', fontSize: 13 }}>
+                        <code style={{ background: '#edf2f7', padding: '2px 7px', borderRadius: 4, fontSize: 12, color: '#553c9a' }}>{item.shortcut || '—'}</code>
+                      </td>
+                      <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 500, color: '#2d3748' }}>{item.title}</td>
+                      <td style={{ padding: '11px 16px', fontSize: 12 }}>
+                        <span style={{ background: '#ebf8ff', color: '#2b6cb0', padding: '2px 9px', borderRadius: 20, fontWeight: 600 }}>
+                          {item.category || 'general'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '11px 16px', fontSize: 12, color: '#718096', maxWidth: 260 }}>
+                        {(item.content || '').length > 50 ? item.content.slice(0, 50) + '…' : item.content}
+                      </td>
+                      <td style={{ padding: '11px 16px' }} onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleDelete(id)}
+                          style={{ padding: '5px 12px', background: '#fff5f5', color: '#c53030', border: '1px solid #fc8181', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+
+                    {/* Inline edit row */}
+                    {isEditing && (
+                      <tr style={{ background: '#f0fff4', borderBottom: '2px solid #9ae6b4' }}>
+                        <td colSpan={5} style={{ padding: 20 }}>
+                          <form onSubmit={handleEditSave}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 12 }}>
+                              <div>
+                                <label style={labelStyle}>Shortcut</label>
+                                <input style={inputStyle} value={editForm.shortcut} onChange={e => setEditForm(p => ({ ...p, shortcut: e.target.value }))} />
+                              </div>
+                              <div>
+                                <label style={labelStyle}>Category</label>
+                                <select style={inputStyle} value={editForm.category} onChange={e => setEditForm(p => ({ ...p, category: e.target.value }))}>
+                                  {CANNED_CATEGORIES.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div style={{ marginBottom: 12 }}>
+                              <label style={labelStyle}>Title <span style={{ color: '#e53e3e' }}>*</span></label>
+                              <input style={inputStyle} value={editForm.title} onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))} />
+                            </div>
+                            <div style={{ marginBottom: 12 }}>
+                              <label style={labelStyle}>Content <span style={{ color: '#e53e3e' }}>*</span></label>
+                              <textarea style={{ ...inputStyle, resize: 'vertical', minHeight: 80 }} value={editForm.content} onChange={e => setEditForm(p => ({ ...p, content: e.target.value }))} />
+                            </div>
+                            {editError && <p style={{ fontSize: 12, color: '#c53030', marginBottom: 8 }}>{editError}</p>}
+                            <div style={{ display: 'flex', gap: 10 }}>
+                              <button
+                                type="submit"
+                                disabled={editSaving}
+                                style={{ padding: '8px 20px', background: editSaving ? '#a0aec0' : '#25d366', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: editSaving ? 'not-allowed' : 'pointer' }}
+                              >
+                                {editSaving ? 'Saving...' : 'Update'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setEditId(null); setEditError(''); }}
+                                style={{ padding: '8px 20px', background: '#edf2f7', color: '#4a5568', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Labels Tab ───────────────────────────────────────────────────────────────
+
+const PRESET_COLORS = ['#25d366', '#3182ce', '#d69e2e', '#e53e3e', '#805ad5', '#ed8936', '#38b2ac', '#dd6b20'];
+
+function LabelsTab() {
+  const [labels,      setLabels]     = useState([]);
+  const [loading,     setLoading]    = useState(true);
+  const [error,       setError]      = useState('');
+  const [newName,     setNewName]    = useState('');
+  const [newColor,    setNewColor]   = useState(PRESET_COLORS[0]);
+  const [addSaving,   setAddSaving]  = useState(false);
+  const [addError,    setAddError]   = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.get('/api/chat/labels')
+      .then(r => setLabels(r.data.data || r.data || []))
+      .catch(e => setError(e.response?.data?.message || e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (!newName.trim()) { setAddError('Label name is required.'); return; }
+    setAddSaving(true); setAddError('');
+    try {
+      await api.post('/api/chat/labels', { name: newName.trim(), color: newColor });
+      setNewName('');
+      setNewColor(PRESET_COLORS[0]);
+      load();
+    } catch (e) {
+      setAddError(e.response?.data?.message || 'Failed to create label.');
+    } finally { setAddSaving(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this label?')) return;
+    try {
+      await api.delete(`/api/chat/labels/${id}`);
+      load();
+    } catch (e) {
+      alert(e.response?.data?.message || 'Delete failed.');
+    }
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#2d3748', margin: 0 }}>Labels</h2>
+        <p style={{ fontSize: 13, color: '#718096', marginTop: 4 }}>Organize conversations with color-coded labels.</p>
+      </div>
+
+      {error && (
+        <div style={{ padding: '10px 14px', background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, color: '#c53030', fontSize: 13, marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Add label form */}
+      <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0', marginBottom: 28 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: '#2d3748', marginBottom: 16 }}>Add Label</h3>
+        <form onSubmit={handleAdd}>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            {/* Name */}
+            <div style={{ flex: '1 1 180px' }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 5 }}>Label Name</label>
+              <input
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder="e.g. Urgent"
+                style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {/* Color picker */}
+            <div style={{ flex: '0 0 auto' }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 5 }}>Color</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {PRESET_COLORS.map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setNewColor(c)}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: '50%',
+                      background: c,
+                      border: newColor === c ? '3px solid #2d3748' : '2px solid transparent',
+                      cursor: 'pointer',
+                      outline: newColor === c ? '2px solid #fff' : 'none',
+                      outlineOffset: '-4px',
+                      transition: 'border 0.15s',
+                    }}
+                    title={c}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Preview */}
+            <div style={{ flex: '0 0 auto', paddingBottom: 2 }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '5px 14px',
+                borderRadius: 20,
+                background: newColor + '22',
+                color: newColor,
+                fontWeight: 700,
+                fontSize: 13,
+                border: `1px solid ${newColor}55`,
+              }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: newColor, display: 'inline-block' }} />
+                {newName || 'Preview'}
+              </span>
+            </div>
+
+            {/* Submit */}
+            <div style={{ flex: '0 0 auto' }}>
+              <button
+                type="submit"
+                disabled={addSaving}
+                style={{ padding: '9px 22px', background: addSaving ? '#a0aec0' : '#25d366', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: addSaving ? 'not-allowed' : 'pointer' }}
+              >
+                {addSaving ? 'Adding...' : 'Add Label'}
+              </button>
+            </div>
+          </div>
+          {addError && <p style={{ fontSize: 12, color: '#c53030', marginTop: 10 }}>{addError}</p>}
+        </form>
+      </div>
+
+      {/* Labels grid */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: '#a0aec0' }}>Loading labels...</div>
+      ) : labels.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 48, color: '#a0aec0', background: '#fff', borderRadius: 12, border: '1px dashed #e2e8f0' }}>
+          No labels yet. Create your first label above.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          {labels.map(label => {
+            const id = label._id || label.id;
+            const color = label.color || '#25d366';
+            return (
+              <div
+                key={id}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '8px 14px 8px 12px',
+                  background: '#fff',
+                  border: `1px solid ${color}55`,
+                  borderRadius: 24,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
+                }}
+              >
+                <span style={{ width: 11, height: 11, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#2d3748' }}>{label.name}</span>
+                <button
+                  onClick={() => handleDelete(id)}
+                  title="Delete label"
+                  style={{
+                    marginLeft: 4,
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    background: '#fed7d7',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    color: '#c53030',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    lineHeight: 1,
+                    padding: 0,
+                    flexShrink: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Settings Page ───────────────────────────────────────────────────────
+
+const TABS = [
+  { id: 'whatsapp', label: '⚙️ WhatsApp Config' },
+  { id: 'canned',   label: '💬 Canned Responses' },
+  { id: 'labels',   label: '🏷️ Labels' },
+];
+
+export default function Settings() {
+  const [activeTab, setActiveTab] = useState('whatsapp');
+
+  return (
+    <div style={{ maxWidth: 780 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 700, color: '#2d3748', marginBottom: 8 }}>Settings</h1>
+      <p style={{ color: '#718096', marginBottom: 28, fontSize: 14 }}>
+        Manage your WhatsApp configuration, canned responses, and conversation labels.
+      </p>
+
+      {/* Tab navigation */}
+      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #e2e8f0', marginBottom: 32 }}>
+        {TABS.map(tab => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '10px 22px',
+                background: 'none',
+                border: 'none',
+                borderBottom: isActive ? '2px solid #25d366' : '2px solid transparent',
+                marginBottom: -2,
+                fontSize: 13,
+                fontWeight: isActive ? 700 : 500,
+                color: isActive ? '#25d366' : '#718096',
+                cursor: 'pointer',
+                transition: 'color 0.15s, border-color 0.15s',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab panels */}
+      {activeTab === 'whatsapp' && <WhatsAppConfigTab />}
+      {activeTab === 'canned'   && <CannedResponsesTab />}
+      {activeTab === 'labels'   && <LabelsTab />}
     </div>
   );
 }

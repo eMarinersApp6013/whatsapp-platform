@@ -32,6 +32,7 @@ const ordersRoutes   = require('./routes/orders.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const invoiceRoutes   = require('./routes/invoice.routes');
 const catalogRoutes   = require('./routes/catalog.routes');
+const chatRoutes      = require('./routes/chat.routes');
 
 app.use('/api/auth',      authRoutes);
 app.use('/api/dashboard', dashRoutes);
@@ -42,6 +43,7 @@ app.use('/api/orders',    ordersRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/invoice',   invoiceRoutes);
 app.use('/api/catalog',   catalogRoutes);
+app.use('/api/chat',      chatRoutes);
 app.use('/webhook',       webhookRoutes);
 
 // ── Socket.io: real-time messaging ────────────────────────────────────────────
@@ -64,6 +66,9 @@ io.on('connection', (socket) => {
 
 // Make io accessible to routes
 app.set('io', io);
+
+// ── Static uploads ────────────────────────────────────────────────────────────
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── Static admin panel ────────────────────────────────────────────────────────
 const buildPath = path.join(__dirname, 'admin-panel', 'build');

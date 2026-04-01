@@ -90,6 +90,8 @@ async function processMessage(phone, content, msgType, mediaUrl, app) {
       'INSERT INTO messages (conversation_id, tenant_id, direction, message_type, content, media_url) VALUES ($1,$2,$3,$4,$5,$6)',
       [convId, TENANT_ID, 'in', msgType, content, mediaUrl]
     )
+    // Increment unread count
+    await pool.query('UPDATE conversations SET unread_count = unread_count + 1 WHERE id=$1', [convId])
 
     // 4. Emit real-time to admin panel
     const io = app.get('io')

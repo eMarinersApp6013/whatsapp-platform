@@ -34,6 +34,11 @@ exports.sendImage = async (to, imageUrl, caption = '') => send({
   type: 'image', image: { link: imageUrl, caption }
 })
 
+exports.sendDocument = async (to, docUrl, filename = 'document') => send({
+  messaging_product: 'whatsapp', to,
+  type: 'document', document: { link: docUrl, filename }
+})
+
 exports.sendButtons = async (to, body, buttons) => send({
   messaging_product: 'whatsapp', to, type: 'interactive',
   interactive: {
