@@ -50,11 +50,23 @@ exports.getHome = async (req, res) => {
     const client = clientPhone ? await getClientByPhone(clientPhone) : null
 
     const [topSellers, newArrivals, bundles] = await Promise.all([
+      // Real top-sellers: rank by number of times ordered this week
       pool.query(`
-        SELECT p.*, 0 AS order_count
+        SELECT p.*,
+               COALESCE(sales.order_count, 0) AS order_count,
+               CASE WHEN COALESCE(sales.order_count, 0) >= 5 THEN true ELSE false END AS is_hot
         FROM products p
+        LEFT JOIN (
+          SELECT (item->>'product_id')::int AS product_id,
+                 COUNT(*) AS order_count
+          FROM orders, jsonb_array_elements(items) AS item
+          WHERE tenant_id=$1
+            AND created_at > NOW() - INTERVAL '7 days'
+          GROUP BY 1
+        ) sales ON sales.product_id = p.id
         WHERE p.tenant_id=$1 AND p.is_active=true
-        ORDER BY p.created_at DESC LIMIT 6
+        ORDER BY order_count DESC, p.created_at DESC
+        LIMIT 6
       `, [TENANT_ID]),
       pool.query(
         'SELECT * FROM products WHERE tenant_id=$1 AND is_active=true ORDER BY created_at DESC LIMIT 6',
@@ -70,10 +82,11 @@ exports.getHome = async (req, res) => {
     if (client) {
       const history = await getOrderHistory(client.id)
       if (history.length) {
+        const excludeList = history.map(id => parseInt(id)).filter(Boolean)
         const { rows: rec } = await pool.query(
           `SELECT * FROM products WHERE tenant_id=$1 AND is_active=true
-           AND id NOT IN (${history.join(',')}) LIMIT 4`,
-          [TENANT_ID]
+           AND id != ALL($2::int[]) LIMIT 4`,
+          [TENANT_ID, excludeList]
         )
         recommended = rec
       }
@@ -97,7 +110,7 @@ exports.search = async (req, res) => {
     const { query = '', clientPhone, sort = 'relevance', page = 1, limit = 20 } = req.body
     if (!query.trim()) return res.json({ products: [], total: 0, corrected_query: '' })
 
-    // GPT-4o corrects spelling + extracts keywords
+    // GPT-4o corrects spelling + extracts keywords (supports Hindi/Hinglish)
     let correctedQuery = query
     if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'FILL_LATER') {
       try {
@@ -105,9 +118,21 @@ exports.search = async (req, res) => {
           model: 'gpt-4o',
           messages: [{
             role: 'user',
-            content: `You are a maritime/naval ecommerce search assistant. Correct spelling mistakes and extract keywords from this search query. Return ONLY the corrected plain text, nothing else.\n\nQuery: "${query}"`
+            content: `You are a maritime/naval ecommerce search assistant. Do the following:
+1. If the query is in Hindi or Hinglish (mix of Hindi and English), translate it to English product keywords.
+2. Correct any spelling mistakes.
+3. Extract the most relevant product search keywords.
+Return ONLY the corrected/translated plain text in English, nothing else.
+
+Examples:
+- "safedi wala kapda" → "white clothing"
+- "neela jacket" → "blue jacket"
+- "pani wala boot" → "waterproof boots"
+- "navy wala uniform" → "navy uniform"
+
+Query: "${query}"`
           }],
-          max_tokens: 50,
+          max_tokens: 60,
           temperature: 0,
         })
         correctedQuery = resp.choices[0].message.content.trim()
@@ -126,11 +151,39 @@ exports.search = async (req, res) => {
     const params = [TENANT_ID, ...terms.map(t => `%${t}%`)]
     const offset = (parseInt(page) - 1) * parseInt(limit)
 
+    // ── Feature 9: Smart sort "Best for me" ───────────────────────────────────
+    let orderClause = 'ORDER BY p.name'
+    if (sort === 'best_for_me' && clientPhone) {
+      const client = await getClientByPhone(clientPhone)
+      if (client) {
+        orderClause = `ORDER BY (
+          COALESCE((
+            SELECT COUNT(*) * 10 FROM orders o, jsonb_array_elements(o.items) item
+            WHERE o.client_id = ${client.id}
+              AND (item->>'product_id')::int = p.id
+          ), 0) +
+          COALESCE((
+            SELECT COUNT(*) * 5 FROM wishlists w
+            WHERE w.client_id = ${client.id} AND w.product_id = p.id
+          ), 0) +
+          COALESCE(p.view_count, 0) * 3
+        ) DESC, p.name`
+      }
+    } else if (sort === 'price_asc') {
+      orderClause = 'ORDER BY p.price ASC'
+    } else if (sort === 'price_desc') {
+      orderClause = 'ORDER BY p.price DESC'
+    } else if (sort === 'newest') {
+      orderClause = 'ORDER BY p.created_at DESC'
+    } else if (sort === 'popular') {
+      orderClause = 'ORDER BY COALESCE(p.view_count, 0) DESC, p.name'
+    }
+
     const { rows: products } = await pool.query(
       `SELECT p.* FROM products p
        WHERE p.tenant_id=$1 AND p.is_active=true
        ${conditions ? 'AND ' + conditions : ''}
-       ORDER BY p.name
+       ${orderClause}
        LIMIT ${parseInt(limit)} OFFSET ${offset}`,
       params
     )
@@ -173,7 +226,7 @@ exports.voiceSearch = async (req, res) => {
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
       model: 'whisper-1',
-      language: 'en',
+      // language omitted → Whisper auto-detects (supports Hindi, Hinglish, English)
     })
 
     const transcript = transcription.text
@@ -530,10 +583,22 @@ exports.imageSearch = async (req, res) => {
   }
 }
 
+// ── GST helper: returns rate based on HSN code range ─────────────────────────
+function getGstRate(hsnCode) {
+  if (!hsnCode) return 0.18  // default 18% if no HSN
+  const hsn = parseInt(hsnCode.toString().substring(0, 4))
+  // Essential goods (5%): food, agriculture, basic textiles
+  if ((hsn >= 101 && hsn <= 210) || (hsn >= 5001 && hsn <= 5113)) return 0.05
+  // Standard goods (12%): processed foods, electronics accessories, clothing <₹1000
+  if ((hsn >= 1601 && hsn <= 2106) || (hsn >= 6101 && hsn <= 6217) || (hsn >= 8469 && hsn <= 8479)) return 0.12
+  // Standard goods (18%): most manufactured goods, electronics, furniture
+  return 0.18
+}
+
 // ── Feature 10: Shipping Calculator ──────────────────────────────────────────
 exports.shippingCalc = async (req, res) => {
   try {
-    const { pincode, weight_kg = 0.5, cart_total = 0 } = req.body
+    const { pincode, weight_kg = 0.5, cart_total = 0, cart_items = [] } = req.body
     if (!pincode) return res.status(400).json({ error: 'pincode required' })
 
     // Determine state from pincode prefix
@@ -576,17 +641,53 @@ exports.shippingCalc = async (req, res) => {
       { name: 'India Post',  days: '5-8', price: cost - 10,   prepaid: false },
     ]
 
-    const prepaidSavings = parseFloat(cart_total) >= 500 ? 30 : 0
+    const cartAmt       = parseFloat(cart_total)
+    const prepaidSavings = cartAmt >= 500 ? 30 : 0
+    const codFee         = 50  // flat COD handling fee
+
+    // ── GST calculation per item ──────────────────────────────────────────────
+    let gstBreakdown = []
+    let totalGst     = 0
+    if (cart_items && cart_items.length > 0) {
+      for (const item of cart_items) {
+        const rate    = getGstRate(item.hsn_code)
+        const base    = parseFloat(item.price || 0) * parseInt(item.qty || 1)
+        const gstAmt  = parseFloat((base * rate).toFixed(2))
+        totalGst     += gstAmt
+        gstBreakdown.push({
+          name:     item.name,
+          base,
+          gst_rate: `${(rate * 100).toFixed(0)}%`,
+          gst_amt:  gstAmt,
+          total:    parseFloat((base + gstAmt).toFixed(2)),
+        })
+      }
+      totalGst = parseFloat(totalGst.toFixed(2))
+    }
+
+    const sortedByPrice = [...couriers].sort((a, b) => a.price - b.price)
+    const sortedByDays  = [...couriers].sort((a, b) => parseInt(a.days) - parseInt(b.days))
 
     return res.json({
-      zone: stateZone,
+      zone:      stateZone,
       weight_kg: kg,
-      couriers,
-      cheapest:       couriers.sort((a,b) => a.price - b.price)[0],
-      fastest:        couriers.sort((a,b) => parseInt(a.days) - parseInt(b.days))[0],
+      couriers:  couriers.map(c => ({
+        ...c,
+        cod_total:     parseFloat((c.price + codFee).toFixed(2)),
+        prepaid_total: parseFloat((c.price - (cartAmt >= 999 ? c.price : 0)).toFixed(2)),
+      })),
+      cheapest:        sortedByPrice[0],
+      fastest:         sortedByDays[0],
+      cod_fee:         codFee,
       prepaid_savings: prepaidSavings,
       free_shipping_at: 999,
-      qualifies_free:  parseFloat(cart_total) >= 999,
+      qualifies_free:  cartAmt >= 999,
+      gst: {
+        breakdown: gstBreakdown,
+        total_gst: totalGst,
+        cart_subtotal:   cartAmt,
+        cart_with_gst:   parseFloat((cartAmt + totalGst).toFixed(2)),
+      },
     })
   } catch (err) {
     return res.status(500).json({ error: err.message })
@@ -614,6 +715,29 @@ exports.addCustomToCart = async (req, res) => {
     const { clientPhone, productId, customSpec } = req.body
     req.body = { clientPhone, productId, qty: 1, variant: 'custom', customSpec }
     return exports.addToCart(req, res)
+  } catch (err) {
+    return res.status(500).json({ error: err.message })
+  }
+}
+
+// ── Feature 9 support: Record product view ────────────────────────────────────
+exports.recordView = async (req, res) => {
+  try {
+    const { productId, clientPhone } = req.body
+    if (!productId) return res.status(400).json({ error: 'productId required' })
+
+    const client = clientPhone ? await getClientByPhone(clientPhone) : null
+
+    await pool.query(
+      'INSERT INTO product_views (tenant_id, product_id, client_id) VALUES ($1, $2, $3)',
+      [TENANT_ID, productId, client?.id || null]
+    )
+    // Update denormalised counter on product row
+    await pool.query(
+      'UPDATE products SET view_count = COALESCE(view_count, 0) + 1 WHERE id=$1 AND tenant_id=$2',
+      [productId, TENANT_ID]
+    )
+    return res.json({ success: true })
   } catch (err) {
     return res.status(500).json({ error: err.message })
   }

@@ -46,4 +46,7 @@ router.post('/shipping-calc',     catalog.shippingCalc)
 router.get('/product/:id/custom-options', catalog.getCustomOptions)
 router.post('/cart/add-custom',   catalog.addCustomToCart)
 
+// Feature 9 support — Record product view (for smart sort ranking)
+router.post('/view',              catalog.recordView)
+
 module.exports = router

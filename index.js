@@ -89,6 +89,14 @@ app.get(/^(?!\/(api|webhook|health|socket\.io)).*/, (_req, res) => {
   res.sendFile(path.join(buildPath, 'index.html'));
 });
 
+// ── Start automation (keep-in-touch jobs) ─────────────────────────────────────
+try {
+  const { startAutomation } = require('./cron/automation');
+  startAutomation();
+} catch (err) {
+  console.warn('[automation] could not start (Redis unavailable?):', err.message);
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 4100;
 server.listen(PORT, () => {
