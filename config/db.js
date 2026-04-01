@@ -2,10 +2,11 @@ require('dotenv').config();
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  host: '/var/run/postgresql',
-  port: 5433,
-  user: 'postgres',
-  database: 'navystore_agent',
+  host: process.env.DB_HOST || '/var/run/postgresql',
+  port: parseInt(process.env.DB_PORT) || 5432,
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'wa_chat',
 });
 
 pool.on('error', (err) => {
