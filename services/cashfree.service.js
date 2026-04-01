@@ -28,8 +28,8 @@ async function createOrder({ orderId, orderAmount, customerPhone, customerName, 
       customer_email: customerEmail || `${customerPhone}@noemail.com`,
     },
     order_meta: {
-      return_url: returnUrl || `${process.env.APP_URL || 'https://whatsapp.nodesurge.tech'}/payment/return?order_id={order_id}`,
-      notify_url: `${process.env.APP_URL || 'https://whatsapp.nodesurge.tech'}/webhook/cashfree`,
+      return_url: returnUrl || `${process.env.APP_URL || 'https://wa.nodesurge.tech'}/payment/return?order_id={order_id}`,
+      notify_url: `${process.env.APP_URL || 'https://wa.nodesurge.tech'}/webhook/cashfree`,
     },
   };
 

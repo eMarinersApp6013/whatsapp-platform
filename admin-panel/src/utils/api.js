@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'https://whatsapp.nodesurge.tech';
+const API_BASE = process.env.REACT_APP_API_URL || 'https://wa.nodesurge.tech';
 
 const api = axios.create({
   baseURL: API_BASE,

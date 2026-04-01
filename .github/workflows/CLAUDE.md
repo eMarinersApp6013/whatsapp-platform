@@ -3,8 +3,8 @@
 ## SERVER
 - VPS: 147.93.97.186 (Hostinger Ubuntu 24.04)
 - App folder: /var/www/wa-chat/
-- App URL: https://whatsapp.nodesurge.tech (port 4100)
-- Admin URL: https://admin.nodesurge.tech (port 4201)
+- App URL: https://wa.nodesurge.tech (port 4100)
+- Admin URL: https://adm.nodesurge.tech (port 4201)
 - Deploy: push to main branch = auto live in 60 seconds
 - GitHub: eMarinersApp6013/whatsapp-platform
 - DO NOT TOUCH: port 3000 (Chatwoot), port 4000 (old courier), port 5678 (n8n)
