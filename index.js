@@ -32,7 +32,11 @@ const ordersRoutes   = require('./routes/orders.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const invoiceRoutes   = require('./routes/invoice.routes');
 const catalogRoutes   = require('./routes/catalog.routes');
-const chatRoutes      = require('./routes/chat.routes');
+const chatRoutes            = require('./routes/chat.routes');
+const agentsRoutes          = require('./routes/agents.routes');
+const apiKeysRoutes         = require('./routes/apikeys.routes');
+const outgoingWebhookRoutes = require('./routes/outgoing-webhooks.routes');
+const publicApiRoutes       = require('./routes/public-api.routes');
 
 app.use('/api/auth',      authRoutes);
 app.use('/api/dashboard', dashRoutes);
@@ -44,6 +48,10 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/invoice',   invoiceRoutes);
 app.use('/api/catalog',   catalogRoutes);
 app.use('/api/chat',      chatRoutes);
+app.use('/api/agents',    agentsRoutes);
+app.use('/api/apikeys',   apiKeysRoutes);
+app.use('/api/webhooks',  outgoingWebhookRoutes);
+app.use('/v1',            publicApiRoutes);   // Public REST API (X-Api-Key auth)
 app.use('/webhook',       webhookRoutes);
 
 // ── Socket.io: real-time messaging ────────────────────────────────────────────
@@ -55,8 +63,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('send_message', (data) => {
-    // data: { conversation_id, content, direction }
     io.to(`conv_${data.conversation_id}`).emit('new_message', data);
+  });
+
+  // Agent joins their personal room for targeted notifications
+  socket.on('agent_connect', (agentId) => {
+    socket.join(`agent_${agentId}`);
   });
 
   socket.on('disconnect', () => {

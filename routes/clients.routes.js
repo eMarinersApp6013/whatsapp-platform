@@ -5,6 +5,7 @@ const pool     = require('../config/db');
 const path     = require('path');
 const fs       = require('fs');
 const multer   = require('multer');
+const { triggerEvent } = require('../services/webhook-trigger.service');
 
 // ── File upload setup ─────────────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, '..', 'uploads');
@@ -120,6 +121,55 @@ router.patch('/:id/status', async (req, res) => {
   }
 });
 
+// ─── PATCH /api/clients/:id/resolve ──────────────────────────────────────────
+router.patch('/:id/resolve', async (req, res) => {
+  try {
+    const { agent_name = 'Agent' } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE conversations
+         SET status = 'resolved', resolved_at = NOW(), resolved_by = $2
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, agent_name]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Not found' });
+
+    const io = req.app.get('io');
+    if (io) io.to(`conv_${req.params.id}`).emit('conversation_update', rows[0]);
+
+    triggerEvent('conversation.resolved', {
+      conversation_id: rows[0].id,
+      resolved_by: agent_name,
+      resolved_at: rows[0].resolved_at,
+    });
+
+    return res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── PATCH /api/clients/:id/reopen ───────────────────────────────────────────
+router.patch('/:id/reopen', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE conversations
+         SET status = 'open', resolved_at = NULL, resolved_by = NULL
+       WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Not found' });
+
+    const io = req.app.get('io');
+    if (io) io.to(`conv_${req.params.id}`).emit('conversation_update', rows[0]);
+
+    triggerEvent('conversation.reopened', { conversation_id: rows[0].id });
+
+    return res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ─── POST /api/clients/:id/reply ─────────────────────────────────────────────
 router.post('/:id/reply', async (req, res) => {
   try {
@@ -151,6 +201,12 @@ router.post('/:id/reply', async (req, res) => {
         await metaSvc.sendText(rows[0].phone, content);
       }
     } catch (_e) { /* Meta not configured */ }
+
+    triggerEvent('message.sent', {
+      conversation_id: req.params.id,
+      content,
+      direction: 'outbound',
+    });
 
     return res.json({ success: true, data: msgRows[0] });
   } catch (err) {

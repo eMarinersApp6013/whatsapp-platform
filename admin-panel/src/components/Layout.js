@@ -4,6 +4,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 const NAV = [
   { to: '/dashboard',     icon: '📊', label: 'Dashboard' },
   { to: '/conversations', icon: '💬', label: 'Conversations' },
+  { to: '/agents',        icon: '👥', label: 'Agents' },
   { to: '/products',      icon: '📦', label: 'Products' },
   { to: '/orders',        icon: '🛒', label: 'Orders' },
   { to: '/analytics',     icon: '📈', label: 'Analytics' },

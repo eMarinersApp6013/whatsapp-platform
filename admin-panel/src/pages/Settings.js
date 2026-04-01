@@ -688,12 +688,335 @@ function LabelsTab() {
   );
 }
 
+// ─── API Keys Tab ─────────────────────────────────────────────────────────────
+
+function ApiKeysTab() {
+  const [keys,       setKeys]      = useState([]);
+  const [loading,    setLoading]   = useState(true);
+  const [newKeyName, setNewKeyName]= useState('');
+  const [newKeyPerms,setNewKeyPerms]= useState(['read']);
+  const [creating,   setCreating]  = useState(false);
+  const [newKey,     setNewKey]    = useState(null);  // revealed once after creation
+  const [error,      setError]     = useState('');
+  const [copied,     setCopied]    = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.get('/api/apikeys')
+      .then(r => setKeys(r.data.data || []))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!newKeyName.trim()) return setError('Name is required');
+    setCreating(true); setError('');
+    try {
+      const r = await api.post('/api/apikeys', { name: newKeyName.trim(), permissions: newKeyPerms });
+      setNewKey(r.data.data.full_key);
+      setNewKeyName('');
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
+    } finally { setCreating(false); }
+  };
+
+  const handleRevoke = async (id) => {
+    if (!window.confirm('Revoke this API key? This cannot be undone.')) return;
+    await api.delete(`/api/apikeys/${id}`).catch(() => {});
+    load();
+  };
+
+  const copyKey = () => {
+    navigator.clipboard.writeText(newKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#2d3748', margin: 0 }}>🔑 API Keys</h2>
+        <p style={{ fontSize: 13, color: '#718096', marginTop: 4 }}>
+          Generate API keys to connect external apps via the REST API (<code>/v1/</code>).
+        </p>
+      </div>
+
+      {/* API Base URL info */}
+      <div style={{ background: '#ebf8ff', border: '1px solid #90cdf4', borderRadius: 10, padding: 14, marginBottom: 24 }}>
+        <p style={{ fontWeight: 600, color: '#2b6cb0', fontSize: 12, marginBottom: 4 }}>Base URL</p>
+        <code style={{ fontSize: 12, color: '#2b6cb0' }}>https://whatsapp.nodesurge.tech/v1/</code>
+        <p style={{ fontSize: 11, color: '#4a90d9', marginTop: 6 }}>
+          Header: <code>X-Api-Key: wsk_xxxxxxxx</code> &nbsp;|&nbsp;
+          Endpoints: /contacts &nbsp;/conversations &nbsp;/conversations/:id/messages &nbsp;/labels
+        </p>
+      </div>
+
+      {error && <div style={{ background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, padding: '10px 14px', color: '#c53030', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+
+      {/* Reveal new key */}
+      {newKey && (
+        <div style={{ background: '#f0fff4', border: '1px solid #9ae6b4', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+          <p style={{ fontWeight: 700, color: '#276749', fontSize: 13, marginBottom: 8 }}>
+            ✓ API key created! Copy it now — it won't be shown again.
+          </p>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <code style={{ flex: 1, background: '#fff', border: '1px solid #9ae6b4', borderRadius: 6, padding: '8px 12px', fontSize: 12, wordBreak: 'break-all' }}>
+              {newKey}
+            </code>
+            <button onClick={copyKey} style={{ padding: '8px 16px', background: copied ? '#276749' : '#25d366', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
+              {copied ? '✓ Copied' : 'Copy'}
+            </button>
+          </div>
+          <button onClick={() => setNewKey(null)} style={{ marginTop: 8, fontSize: 12, color: '#718096', background: 'none', border: 'none', cursor: 'pointer' }}>Dismiss</button>
+        </div>
+      )}
+
+      {/* Create form */}
+      <div style={{ background: '#fff', borderRadius: 12, padding: 20, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 24 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: '#2d3748', marginBottom: 14 }}>Generate New Key</h3>
+        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ flex: '1 1 200px' }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 5 }}>Key Name</label>
+            <input value={newKeyName} onChange={e => setNewKeyName(e.target.value)} placeholder="e.g. My CRM"
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+          <div style={{ flex: '0 0 auto' }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 5 }}>Permissions</label>
+            <select value={newKeyPerms[0]} onChange={e => setNewKeyPerms(e.target.value === 'write' ? ['read','write'] : e.target.value === 'admin' ? ['read','write','admin'] : ['read'])}
+              style={{ padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13 }}>
+              <option value="read">Read only</option>
+              <option value="write">Read + Write</option>
+              <option value="admin">Admin (full)</option>
+            </select>
+          </div>
+          <button type="submit" disabled={creating} style={{ padding: '9px 20px', background: creating ? '#a0aec0' : '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: creating ? 'not-allowed' : 'pointer' }}>
+            {creating ? 'Generating...' : 'Generate Key'}
+          </button>
+        </form>
+      </div>
+
+      {/* Keys table */}
+      {loading ? (
+        <div style={{ padding: 32, textAlign: 'center', color: '#a0aec0' }}>Loading...</div>
+      ) : keys.length === 0 ? (
+        <div style={{ padding: 32, textAlign: 'center', color: '#a0aec0', background: '#fff', borderRadius: 12, border: '1px dashed #e2e8f0' }}>No API keys yet.</div>
+      ) : (
+        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          {keys.map((key, idx) => (
+            <div key={key.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', borderBottom: idx < keys.length - 1 ? '1px solid #f7fafc' : 'none', opacity: key.is_active ? 1 : 0.5 }}>
+              <span style={{ fontSize: 20 }}>🔑</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#1a202c' }}>{key.name}</div>
+                <div style={{ fontSize: 11, color: '#a0aec0', fontFamily: 'monospace' }}>{key.key_prefix}••••••••••••••</div>
+              </div>
+              <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 700, background: '#ebf8ff', color: '#2b6cb0' }}>
+                {key.permissions?.join(', ') || 'read'}
+              </span>
+              <span style={{ fontSize: 11, color: '#718096' }}>{key.last_used_at ? `Last used ${new Date(key.last_used_at).toLocaleDateString()}` : 'Never used'}</span>
+              {key.is_active && (
+                <button onClick={() => handleRevoke(key.id)} style={{ padding: '5px 12px', background: '#fff5f5', color: '#e53e3e', border: '1px solid #fed7d7', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                  Revoke
+                </button>
+              )}
+              {!key.is_active && <span style={{ fontSize: 11, color: '#e53e3e', fontWeight: 700 }}>Revoked</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Outgoing Webhooks Tab ────────────────────────────────────────────────────
+
+const ALL_EVENTS = ['message.received', 'message.sent', 'conversation.resolved', 'conversation.reopened'];
+
+function WebhooksTab() {
+  const [endpoints,  setEndpoints]  = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [showForm,   setShowForm]   = useState(false);
+  const [form,       setForm]       = useState({ name: '', url: '', secret: '', events: ['message.received', 'conversation.resolved'] });
+  const [saving,     setSaving]     = useState(false);
+  const [testingId,  setTestingId]  = useState(null);
+  const [testResult, setTestResult] = useState({});
+  const [error,      setError]      = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.get('/api/webhooks')
+      .then(r => setEndpoints(r.data.data || []))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggleEvent = (ev) => {
+    setForm(p => ({
+      ...p,
+      events: p.events.includes(ev) ? p.events.filter(e => e !== ev) : [...p.events, ev]
+    }));
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.url) return setError('Name and URL required');
+    setSaving(true); setError('');
+    try {
+      await api.post('/api/webhooks', form);
+      setShowForm(false);
+      setForm({ name: '', url: '', secret: '', events: ['message.received', 'conversation.resolved'] });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
+    } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this webhook endpoint?')) return;
+    await api.delete(`/api/webhooks/${id}`).catch(() => {});
+    load();
+  };
+
+  const handleToggle = async (ep) => {
+    await api.put(`/api/webhooks/${ep.id}`, { is_active: !ep.is_active }).catch(() => {});
+    load();
+  };
+
+  const handleTest = async (id) => {
+    setTestingId(id);
+    try {
+      const r = await api.post(`/api/webhooks/${id}/test`);
+      setTestResult(prev => ({ ...prev, [id]: `✓ ${r.data.status_code}` }));
+    } catch (e) {
+      setTestResult(prev => ({ ...prev, [id]: `✗ ${e.response?.data?.message || 'Failed'}` }));
+    } finally { setTestingId(null); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: '#2d3748', margin: 0 }}>🔗 Outgoing Webhooks</h2>
+          <p style={{ fontSize: 13, color: '#718096', marginTop: 4 }}>Push real-time events to your own server or Zapier/Make.</p>
+        </div>
+        {!showForm && (
+          <button onClick={() => { setShowForm(true); setError(''); }} style={{ padding: '9px 18px', background: '#25d366', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+            + Add Endpoint
+          </button>
+        )}
+      </div>
+
+      {error && <div style={{ background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, padding: '10px 14px', color: '#c53030', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+
+      {/* Add form */}
+      {showForm && (
+        <div style={{ background: '#f7fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>New Webhook Endpoint</h3>
+          <form onSubmit={handleSave}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 5 }}>Name *</label>
+                <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. My CRM"
+                  style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 5 }}>Signing Secret (optional)</label>
+                <input value={form.secret} onChange={e => setForm(p => ({ ...p, secret: e.target.value }))} placeholder="HMAC signing secret"
+                  style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 5 }}>Endpoint URL *</label>
+              <input value={form.url} onChange={e => setForm(p => ({ ...p, url: e.target.value }))} placeholder="https://your-server.com/webhook"
+                style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 8 }}>Subscribe to Events</label>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {ALL_EVENTS.map(ev => (
+                  <label key={ev} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
+                    <input type="checkbox" checked={form.events.includes(ev)} onChange={() => toggleEvent(ev)} />
+                    <code style={{ background: '#edf2f7', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>{ev}</code>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button type="submit" disabled={saving} style={{ padding: '9px 22px', background: saving ? '#a0aec0' : '#25d366', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                {saving ? 'Saving...' : 'Save Endpoint'}
+              </button>
+              <button type="button" onClick={() => setShowForm(false)} style={{ padding: '9px 22px', background: '#edf2f7', color: '#4a5568', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Endpoints list */}
+      {loading ? (
+        <div style={{ padding: 32, textAlign: 'center', color: '#a0aec0' }}>Loading...</div>
+      ) : endpoints.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: '#a0aec0', background: '#fff', borderRadius: 12, border: '1px dashed #e2e8f0' }}>
+          No webhook endpoints yet.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {endpoints.map(ep => (
+            <div key={ep.id} style={{ background: '#fff', border: `1px solid ${ep.is_active ? '#c6f6d5' : '#e2e8f0'}`, borderRadius: 12, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                <div>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: '#1a202c' }}>{ep.name}</span>
+                  {ep.last_status && (
+                    <span style={{ marginLeft: 10, fontSize: 11, padding: '1px 8px', borderRadius: 10, background: ep.last_status >= 200 && ep.last_status < 300 ? '#f0fff4' : '#fff5f5', color: ep.last_status >= 200 && ep.last_status < 300 ? '#276749' : '#c53030', fontWeight: 700 }}>
+                      {ep.last_status}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => handleToggle(ep)} style={{ padding: '4px 10px', background: ep.is_active ? '#fffbeb' : '#f0fff4', color: ep.is_active ? '#d69e2e' : '#276749', border: `1px solid ${ep.is_active ? '#f6e05e' : '#9ae6b4'}`, borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                    {ep.is_active ? 'Disable' : 'Enable'}
+                  </button>
+                  <button onClick={() => handleTest(ep.id)} disabled={testingId === ep.id} style={{ padding: '4px 10px', background: '#ebf8ff', color: '#2b6cb0', border: '1px solid #90cdf4', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                    {testingId === ep.id ? 'Testing...' : 'Test'}
+                  </button>
+                  <button onClick={() => handleDelete(ep.id)} style={{ padding: '4px 10px', background: '#fff5f5', color: '#e53e3e', border: '1px solid #fed7d7', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+              <code style={{ fontSize: 11, color: '#718096', wordBreak: 'break-all' }}>{ep.url}</code>
+              <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {(ep.events || []).map(ev => (
+                  <span key={ev} style={{ padding: '2px 8px', borderRadius: 10, background: '#ebf8ff', color: '#2b6cb0', fontSize: 10, fontWeight: 600 }}>{ev}</span>
+                ))}
+              </div>
+              {testResult[ep.id] && (
+                <div style={{ marginTop: 8, fontSize: 12, color: testResult[ep.id].startsWith('✓') ? '#276749' : '#c53030', fontWeight: 600 }}>
+                  Test result: {testResult[ep.id]}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 
 const TABS = [
   { id: 'whatsapp', label: '⚙️ WhatsApp Config' },
   { id: 'canned',   label: '💬 Canned Responses' },
   { id: 'labels',   label: '🏷️ Labels' },
+  { id: 'apikeys',  label: '🔑 API Keys' },
+  { id: 'webhooks', label: '🔗 Webhooks' },
 ];
 
 export default function Settings() {
@@ -707,7 +1030,7 @@ export default function Settings() {
       </p>
 
       {/* Tab navigation */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #e2e8f0', marginBottom: 32 }}>
+      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #e2e8f0', marginBottom: 32, flexWrap: 'wrap' }}>
         {TABS.map(tab => {
           const isActive = activeTab === tab.id;
           return (
@@ -738,6 +1061,8 @@ export default function Settings() {
       {activeTab === 'whatsapp' && <WhatsAppConfigTab />}
       {activeTab === 'canned'   && <CannedResponsesTab />}
       {activeTab === 'labels'   && <LabelsTab />}
+      {activeTab === 'apikeys'  && <ApiKeysTab />}
+      {activeTab === 'webhooks' && <WebhooksTab />}
     </div>
   );
 }

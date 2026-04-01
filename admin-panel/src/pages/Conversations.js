@@ -6,7 +6,26 @@ const BASE_URL = process.env.REACT_APP_API_URL || 'https://whatsapp.nodesurge.te
 const PRIORITY_COLORS = { urgent: '#e53e3e', normal: '#f59e0b', low: '#3182ce' };
 const STATUS_COLORS   = { open: '#25d366', resolved: '#718096', pending: '#f59e0b' };
 const EMOJIS = ['😊','😂','❤️','👍','🙏','🎉','😢','😡','🤔','👋','✅','❌','📦','🚚','💰','🛒','⭐','🔥','📱','💬','🔔','⚙️','👀','💯','🎁','🚀','✨','💪','🙌','😍','🤝','👌','😎','🥳','🤗','💡','🎯','📊','🏆','🎶'];
-const PRESET_AGENTS   = ['Admin','Agent 1','Agent 2','Agent 3'];
+
+// Notification sound (short 440 Hz beep via Web Audio API)
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.start(); osc.stop(ctx.currentTime + 0.35);
+  } catch (_) {}
+}
+
+function showBrowserNotification(title, body) {
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '/favicon.ico' });
+  }
+}
 
 function Avatar({ name, size = 40 }) {
   const letter = (name || '?')[0].toUpperCase();
@@ -65,6 +84,9 @@ export default function Conversations() {
   const [noteText,     setNoteText]     = useState('');
   const [clientInfo,   setClientInfo]   = useState(null);
 
+  // Agents
+  const [agents,       setAgents]       = useState([]);
+
   // UI
   const [showRight,    setShowRight]    = useState(true);
 
@@ -78,10 +100,13 @@ export default function Conversations() {
   // Keep selectedRef in sync
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
-  // ── Load labels + canned on mount ────────────────────────────────────────
+  // ── Load labels, canned, agents on mount ─────────────────────────────────
   useEffect(() => {
     api.get('/api/chat/labels').then(r => setLabels(r.data.data || [])).catch(() => {});
     api.get('/api/chat/canned').then(r => setCanned(r.data.data || [])).catch(() => {});
+    api.get('/api/agents').then(r => setAgents((r.data.data || []).filter(a => a.is_active))).catch(() => {});
+    // Request notification permission
+    if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
   }, []);
 
   // ── Load conversations ────────────────────────────────────────────────────
@@ -131,7 +156,16 @@ export default function Conversations() {
             ? { ...c, last_message: msg.content, last_message_at: msg.created_at, unread_count: (c.unread_count || 0) + 1 }
             : c
         ));
+        // Notify agent of new message in other conversation
+        if (msg.direction !== 'outbound') {
+          playNotificationSound();
+          showBrowserNotification('New WhatsApp Message', msg.content?.slice(0, 80) || 'New message received');
+        }
       }
+    });
+    socket.on('conversation_update', (conv) => {
+      setConvs(prev => prev.map(c => c.id === conv.id ? { ...c, ...conv } : c));
+      if (selectedRef.current?.id === conv.id) setSelected(s => ({ ...s, ...conv }));
     });
     return () => socket.disconnect();
   }, []); // eslint-disable-line
@@ -198,6 +232,24 @@ export default function Conversations() {
     await api.patch(`/api/clients/${convId}/status`, { status }).catch(() => {});
     setConvs(prev => prev.map(c => c.id === convId ? { ...c, status } : c));
     if (selected?.id === convId) setSelected(s => ({ ...s, status }));
+  };
+
+  const handleResolve = async () => {
+    if (!selected) return;
+    const r = await api.patch(`/api/clients/${selected.id}/resolve`, { agent_name: 'Admin' }).catch(() => null);
+    if (r) {
+      setSelected(s => ({ ...s, status: 'resolved', resolved_at: r.data.data.resolved_at }));
+      setConvs(prev => prev.map(c => c.id === selected.id ? { ...c, status: 'resolved' } : c));
+    }
+  };
+
+  const handleReopen = async () => {
+    if (!selected) return;
+    const r = await api.patch(`/api/clients/${selected.id}/reopen`).catch(() => null);
+    if (r) {
+      setSelected(s => ({ ...s, status: 'open', resolved_at: null }));
+      setConvs(prev => prev.map(c => c.id === selected.id ? { ...c, status: 'open' } : c));
+    }
   };
 
   const handleStar = async () => {
@@ -387,6 +439,15 @@ export default function Conversations() {
               <button onClick={handleStar} title={selected.is_starred ? 'Unstar' : 'Star'} style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px', fontSize: 14, cursor: 'pointer' }}>
                 {selected.is_starred ? '⭐' : '☆'}
               </button>
+              {selected.status !== 'resolved' ? (
+                <button onClick={handleResolve} style={{ padding: '5px 12px', background: '#48bb78', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                  ✓ Resolve
+                </button>
+              ) : (
+                <button onClick={handleReopen} style={{ padding: '5px 12px', background: '#ed8936', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                  ↩ Reopen
+                </button>
+              )}
               <a href={`https://wa.me/${selected.phone}`} target="_blank" rel="noreferrer"
                 style={{ padding: '5px 10px', background: '#25d366', color: '#fff', borderRadius: 6, textDecoration: 'none', fontSize: 11, fontWeight: 600 }}>
                 Open WA
@@ -568,7 +629,11 @@ export default function Conversations() {
             <select value={selected.assigned_to || ''} onChange={e => handleAssign(e.target.value)}
               style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, marginBottom: 10 }}>
               <option value="">— Unassigned —</option>
-              {PRESET_AGENTS.map(a => <option key={a} value={a}>{a}</option>)}
+              {agents.map(a => (
+                <option key={a.id} value={a.name}>
+                  {a.status === 'online' ? '🟢' : a.status === 'busy' ? '🟡' : '⚫'} {a.name} ({a.role})
+                </option>
+              ))}
             </select>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#718096', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Priority</div>
             <select value={selected.priority || 'normal'} onChange={e => handlePriority(e.target.value)}

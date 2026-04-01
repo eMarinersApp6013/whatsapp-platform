@@ -9,6 +9,7 @@ import Products from './pages/Products';
 import Orders from './pages/Orders';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
+import Agents from './pages/Agents';
 import Bundles from './pages/Bundles';
 import RestockAlerts from './pages/RestockAlerts';
 import ShippingZones from './pages/ShippingZones';
@@ -34,6 +35,7 @@ export default function App() {
                   <Route path="/"               element={<Navigate to="/dashboard" replace />} />
                   <Route path="/dashboard"      element={<Dashboard />} />
                   <Route path="/conversations"  element={<Conversations />} />
+                  <Route path="/agents"         element={<Agents />} />
                   <Route path="/products"       element={<Products />} />
                   <Route path="/orders"         element={<Orders />} />
                   <Route path="/analytics"      element={<Analytics />} />
