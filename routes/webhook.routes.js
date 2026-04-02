@@ -205,6 +205,12 @@ async function processMessage(phone, content, msgType, mediaUrl, app) {
       return
     }
 
+    // Payment method button replies
+    if (cmd.startsWith('PAY_PREPAID_') || cmd.startsWith('PAY_COD_')) {
+      await handlePaymentChoice(phone, cmd, client, app)
+      return
+    }
+
     // Address capture state
     const addressResult = await handleAddressCapture(phone, content, client, app)
     if (addressResult) return
@@ -486,18 +492,41 @@ async function handleAddressCapture(phone, content, client, app) {
       `• ${i.name} × ${i.qty}  ₹${(i.price * i.qty).toFixed(0)}`
     ).join('\n')
 
-    await metaSvc.sendText(phone,
-      `✅ *Order Confirmed!*\n\n` +
-      `Order #: *${orderNumber}*\n\n` +
-      `${itemList}\n\n` +
-      `─────────────────\n` +
-      `Subtotal:  ₹${subtotal.toFixed(0)}\n` +
-      `COD Fee:   ₹${codFee}\n` +
-      `*Total:    ₹${total.toFixed(0)}*\n\n` +
-      `📍 Delivering to:\n${address}\n\n` +
-      `💳 Payment: Cash on Delivery\n\n` +
-      `We'll notify you when your order ships! 🚚\nReply *ORDERS* to track your order.`
+    // Check if Razorpay is enabled
+    const { rows: tenantCfg } = await pool.query(
+      'SELECT payment_enabled, razorpay_key_id FROM tenants WHERE id=$1', [TENANT_ID]
     )
+    const paymentEnabled = tenantCfg[0]?.payment_enabled && tenantCfg[0]?.razorpay_key_id
+
+    if (paymentEnabled) {
+      // Offer COD vs Prepaid choice
+      await metaSvc.sendButtons(phone,
+        `✅ Address received!\n\n` +
+        `Order #: *${orderNumber}*\n` +
+        `${itemList}\n\n` +
+        `─────────────────\n` +
+        `Subtotal: ₹${subtotal.toFixed(0)}\n\n` +
+        `Choose payment method:`,
+        [
+          { id: `PAY_PREPAID_${order.id}`, title: '💳 Pay Online (Save ₹50)' },
+          { id: `PAY_COD_${order.id}`,     title: '💵 Cash on Delivery' },
+        ]
+      )
+    } else {
+      // COD only
+      await metaSvc.sendText(phone,
+        `✅ *Order Confirmed!*\n\n` +
+        `Order #: *${orderNumber}*\n\n` +
+        `${itemList}\n\n` +
+        `─────────────────\n` +
+        `Subtotal:  ₹${subtotal.toFixed(0)}\n` +
+        `COD Fee:   ₹${codFee}\n` +
+        `*Total:    ₹${total.toFixed(0)}*\n\n` +
+        `📍 Delivering to:\n${address}\n\n` +
+        `💳 Payment: Cash on Delivery\n\n` +
+        `We'll notify you when your order ships! 🚚\nReply *ORDERS* to track your order.`
+      )
+    }
 
     // Emit to admin panel
     const io = app?.get('io')
@@ -510,6 +539,99 @@ async function handleAddressCapture(phone, content, client, app) {
   } catch (err) {
     console.error('[handleAddressCapture]', err.message)
     return false
+  }
+}
+
+// ── Payment choice handler (COD / Prepaid buttons) ────────────────────────────
+async function handlePaymentChoice(phone, cmd, client, app) {
+  try {
+    const isPrepaid = cmd.startsWith('PAY_PREPAID_')
+    const orderId   = parseInt(cmd.replace('PAY_PREPAID_', '').replace('PAY_COD_', ''))
+    if (!orderId) return
+
+    const { rows: orderRows } = await pool.query(
+      'SELECT * FROM orders WHERE id=$1 AND client_id=$2 AND tenant_id=$3',
+      [orderId, client.id, TENANT_ID]
+    )
+    if (!orderRows.length) {
+      await metaSvc.sendText(phone, '❗ Order not found. Reply *ORDERS* to check your orders.')
+      return
+    }
+    const order = orderRows[0]
+
+    if (isPrepaid) {
+      // Generate Razorpay payment link
+      try {
+        const axios2 = require('axios')
+        const { rows: cfg } = await pool.query(
+          'SELECT razorpay_key_id, razorpay_key_secret FROM tenants WHERE id=$1', [TENANT_ID]
+        )
+        const { razorpay_key_id: keyId, razorpay_key_secret: keySecret } = cfg[0] || {}
+        if (!keyId || !keySecret) throw new Error('Razorpay not configured')
+
+        const amountPaise = Math.round(parseFloat(order.total_amount) * 100)
+        const cleanPhone  = phone.replace(/^\+?91/, '').replace(/\D/g, '')
+        const rpRes = await axios2.post('https://api.razorpay.com/v1/payment_links', {
+          amount:      amountPaise,
+          currency:    'INR',
+          description: `NavyStore Order #${order.order_number}`,
+          customer:    { contact: `+91${cleanPhone}` },
+          notify:      { sms: false, email: false },
+          reminder_enable: false,
+          notes:       { order_id: String(order.id), order_number: order.order_number },
+        }, {
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString('base64')}`,
+            'Content-Type': 'application/json',
+          },
+        })
+
+        const link   = rpRes.data.short_url
+        const linkId = rpRes.data.id
+        await pool.query(
+          "UPDATE orders SET payment_link_id=$1, payment_link_url=$2, payment_method='prepaid', payment_status='link_created' WHERE id=$3",
+          [linkId, link, order.id]
+        )
+
+        await metaSvc.sendText(phone,
+          `💳 *Pay Online & Save ₹50*\n\n` +
+          `Order #${order.order_number}\n` +
+          `Amount: ₹${(amountPaise / 100).toFixed(0)}\n\n` +
+          `Click to pay securely:\n${link}\n\n` +
+          `✓ UPI / Cards / Net Banking / Wallets accepted\n` +
+          `✓ Secure Razorpay payment\n\n` +
+          `Once paid, your order will be confirmed automatically.`
+        )
+      } catch (err) {
+        console.error('[payment/prepaid]', err.message)
+        // Fallback to COD
+        await pool.query(
+          "UPDATE orders SET payment_method='COD', payment_status='pending' WHERE id=$1", [order.id]
+        )
+        await metaSvc.sendText(phone,
+          `⚠️ Online payment is temporarily unavailable. Your order has been confirmed as *Cash on Delivery*.\n\n` +
+          `Order #${order.order_number} — ₹${parseFloat(order.total_amount).toFixed(0)}\n\nWe'll notify you when it ships! 🚚`
+        )
+      }
+    } else {
+      // COD confirmed
+      const codFee = 50
+      const codTotal = parseFloat(order.total_amount)
+      await pool.query(
+        "UPDATE orders SET payment_method='COD', payment_status='pending', total_amount=$1, status='confirmed' WHERE id=$2",
+        [(codTotal).toFixed(2), order.id]
+      )
+      await metaSvc.sendText(phone,
+        `✅ *Order Confirmed — Cash on Delivery!*\n\n` +
+        `Order #: *${order.order_number}*\n` +
+        `Total:   ₹${codTotal.toFixed(0)} (incl. ₹${codFee} COD fee)\n` +
+        `Payment: Collect on delivery\n\n` +
+        `We'll notify you when your order ships! 🚚\n` +
+        `Reply *ORDERS* to track.`
+      )
+    }
+  } catch (err) {
+    console.error('[handlePaymentChoice]', err.message)
   }
 }
 

@@ -285,6 +285,154 @@ function SortIcon({ dir }) {
   return <span style={{ marginLeft: 4 }}>{dir === 'asc' ? '↑' : '↓'}</span>;
 }
 
+// ─── Product Customizer Modal ─────────────────────────────────────────────────
+const OPTION_TYPES = ['text', 'number', 'select', 'color'];
+
+function CustomizerModal({ product, onClose, onSaved }) {
+  const [options, setOptions] = useState(() => {
+    const co = product.custom_options;
+    if (!co) return [];
+    if (Array.isArray(co.options)) return co.options;
+    return [];
+  });
+  const [hsnCode,   setHsnCode]   = useState(product.hsn_code   || '');
+  const [custFee,   setCustFee]   = useState(product.customization_fee || 0);
+  const [saving,    setSaving]    = useState(false);
+  const [error,     setError]     = useState('');
+
+  const addOption = () => setOptions(o => [...o, { label: '', type: 'text', required: false, choices: [], price_modifier: 0 }]);
+  const removeOption = (i) => setOptions(o => o.filter((_, idx) => idx !== i));
+  const updateOption = (i, key, val) => setOptions(o => o.map((opt, idx) => idx === i ? { ...opt, [key]: val } : opt));
+
+  const save = async () => {
+    setSaving(true); setError('');
+    try {
+      const custom_options = options.length > 0 ? { options, customization_fee: parseFloat(custFee) || 0 } : null;
+      await axios.put(`/api/products/${product.id}`, {
+        name: product.name, sku: product.sku, category: product.category,
+        description: product.description, price: product.price,
+        compare_price: product.compare_price, stock_qty: product.stock_qty,
+        image_urls: product.image_urls, weight_kg: product.weight_kg,
+        rank_tags: product.rank_tags, custom_options,
+        is_active: product.is_active,
+        hsn_code: hsnCode || null,
+        customization_fee: parseFloat(custFee) || 0,
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e.response?.data?.message || 'Save failed');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        {/* Header */}
+        <div style={{ background: COLORS.navy, padding: '16px 24px', borderRadius: '16px 16px 0 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ color: COLORS.gold, fontWeight: 700, fontSize: 16 }}>🎨 Product Customizer</div>
+            <div style={{ color: '#a0aec0', fontSize: 12, marginTop: 2 }}>{product.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#a0aec0', fontSize: 22, cursor: 'pointer' }}>✕</button>
+        </div>
+
+        <div style={{ padding: 24 }}>
+          {/* HSN + Fee row */}
+          <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#718096', marginBottom: 6 }}>HSN Code (for GST)</label>
+              <input value={hsnCode} onChange={e => setHsnCode(e.target.value)}
+                placeholder="e.g. 62011" maxLength={8}
+                style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+              <p style={{ fontSize: 11, color: '#a0aec0', marginTop: 3 }}>Used to auto-calculate GST at checkout</p>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#718096', marginBottom: 6 }}>Customization Fee (₹)</label>
+              <input type="number" min="0" value={custFee} onChange={e => setCustFee(e.target.value)}
+                placeholder="0"
+                style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+              <p style={{ fontSize: 11, color: '#a0aec0', marginTop: 3 }}>Added to order total when customized</p>
+            </div>
+          </div>
+
+          {/* Custom Options */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, color: '#2d3748' }}>Custom Options</div>
+            <button onClick={addOption}
+              style={{ padding: '6px 14px', background: '#25d366', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+              + Add Option
+            </button>
+          </div>
+
+          {options.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '24px', background: '#f0f2f5', borderRadius: 10, color: '#718096', fontSize: 13, marginBottom: 16 }}>
+              No custom options yet. Click "+ Add Option" to let customers personalise this product.
+            </div>
+          )}
+
+          {options.map((opt, i) => (
+            <div key={i} style={{ background: '#f7fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 16, marginBottom: 12 }}>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                <div style={{ flex: 2, minWidth: 140 }}>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#718096', marginBottom: 4 }}>Label *</label>
+                  <input value={opt.label} onChange={e => updateOption(i, 'label', e.target.value)}
+                    placeholder="e.g. Engraving Text"
+                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 100 }}>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#718096', marginBottom: 4 }}>Type</label>
+                  <select value={opt.type} onChange={e => updateOption(i, 'type', e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13 }}>
+                    {OPTION_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: 90 }}>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#718096', marginBottom: 4 }}>Price +/- (₹)</label>
+                  <input type="number" value={opt.price_modifier || 0} onChange={e => updateOption(i, 'price_modifier', parseFloat(e.target.value) || 0)}
+                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer', paddingBottom: 8 }}>
+                    <input type="checkbox" checked={!!opt.required} onChange={e => updateOption(i, 'required', e.target.checked)} />
+                    Required
+                  </label>
+                  <button onClick={() => removeOption(i)}
+                    style={{ padding: '6px 10px', background: '#fff5f5', border: '1px solid #fed7d7', color: '#c53030', borderRadius: 6, cursor: 'pointer', fontSize: 13, marginBottom: 1 }}>
+                    ✕
+                  </button>
+                </div>
+              </div>
+              {opt.type === 'select' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#718096', marginBottom: 4 }}>Choices (comma-separated)</label>
+                  <input
+                    value={(opt.choices || []).join(', ')}
+                    onChange={e => updateOption(i, 'choices', e.target.value.split(',').map(c => c.trim()).filter(Boolean))}
+                    placeholder="Small, Medium, Large"
+                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+                </div>
+              )}
+            </div>
+          ))}
+
+          {error && <div style={{ padding: '10px 14px', background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, color: '#c53030', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 8 }}>
+            <button onClick={onClose} style={{ padding: '10px 22px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', fontSize: 14 }}>
+              Cancel
+            </button>
+            <button onClick={save} disabled={saving}
+              style={{ padding: '10px 28px', background: COLORS.navy, color: COLORS.gold, border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              {saving ? 'Saving...' : 'Save Customizer'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function Products() {
   const [products, setProducts]       = useState([]);
@@ -298,6 +446,7 @@ export default function Products() {
   const [pagination, setPagination]   = useState({ total: 0, pages: 1 });
   const [sort, setSort]               = useState({ col: 'created_at', dir: 'desc' });
   const [hoveredRow, setHoveredRow]   = useState(null);
+  const [customizerProduct, setCustomizerProduct] = useState(null);
   const LIMIT = 50;
   const searchTimeout = useRef(null);
 
@@ -379,11 +528,19 @@ export default function Products() {
     { key: 'stock_qty',     label: 'Stock',        sortable: true  },
     { key: 'platforms',     label: 'Platforms',    sortable: false },
     { key: 'status',        label: 'Status',       sortable: true  },
+    { key: 'actions',       label: '',             sortable: false },
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
+      {customizerProduct && (
+        <CustomizerModal
+          product={customizerProduct}
+          onClose={() => setCustomizerProduct(null)}
+          onSaved={() => fetchProducts()}
+        />
+      )}
 
       {/* Header */}
       <div style={styles.header}>
@@ -586,6 +743,26 @@ export default function Products() {
                   {/* Status */}
                   <td style={styles.td}>
                     <span style={styles.statusBadge(p.status)}>{STATUS_META[p.status]?.label || p.status || '—'}</span>
+                  </td>
+
+                  {/* Actions */}
+                  <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                    <button
+                      onClick={() => setCustomizerProduct(p)}
+                      title="Edit customizer options"
+                      style={{
+                        padding: '4px 10px',
+                        background: p.custom_options ? '#ebf8ff' : '#f0f2f5',
+                        color:      p.custom_options ? '#2b6cb0' : '#718096',
+                        border:     `1px solid ${p.custom_options ? '#90cdf4' : '#e2e8f0'}`,
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        fontWeight: 500,
+                      }}
+                    >
+                      🎨 {p.custom_options ? 'Edit' : 'Add'} Options
+                    </button>
                   </td>
                 </tr>
               ))}

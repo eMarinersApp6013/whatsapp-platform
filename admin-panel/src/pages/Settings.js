@@ -1011,12 +1011,112 @@ function WebhooksTab() {
 
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 
+// ─── Payment / Razorpay Tab ───────────────────────────────────────────────────
+function PaymentTab() {
+  const [form,    setForm]    = useState({ razorpay_key_id: '', razorpay_key_secret: '', razorpay_webhook_secret: '', payment_enabled: false });
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+  const [saved,   setSaved]   = useState(false);
+  const [error,   setError]   = useState('');
+  const [showSec, setShowSec] = useState(false);
+  const [showWh,  setShowWh]  = useState(false);
+
+  useEffect(() => {
+    api.get('/api/settings/razorpay')
+      .then(r => setForm(r.data.data || form))
+      .catch(e => setError(e.response?.data?.error || e.message))
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true); setError(''); setSaved(false);
+    try {
+      await api.post('/api/settings/razorpay', form);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setError(e.response?.data?.error || 'Save failed');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#718096' }}>Loading...</div>;
+
+  const inp = (label, key, type = 'text', help = '', show, onToggle) => (
+    <div style={{ marginBottom: 20 }}>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#2d3748', marginBottom: 6 }}>{label}</label>
+      <div style={{ position: 'relative' }}>
+        <input
+          type={type === 'password' && !show ? 'password' : 'text'}
+          value={form[key] || ''}
+          onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+          placeholder={form[key]?.includes('****') ? form[key] : `Enter ${label}`}
+          style={{ width: '100%', padding: '10px 40px 10px 14px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }}
+        />
+        {type === 'password' && (
+          <button onClick={onToggle} type="button" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>
+            {show ? '🙈' : '👁️'}
+          </button>
+        )}
+      </div>
+      {help && <p style={{ fontSize: 11, color: '#a0aec0', marginTop: 4 }}>{help}</p>}
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Info banner */}
+      <div style={{ background: '#ebf8ff', border: '1px solid #90cdf4', borderRadius: 10, padding: 16, marginBottom: 24 }}>
+        <p style={{ fontWeight: 600, color: '#2b6cb0', fontSize: 13, marginBottom: 4 }}>Razorpay Payment Integration</p>
+        <p style={{ fontSize: 12, color: '#4a90d9', margin: 0 }}>
+          When enabled, customers can choose between <b>Cash on Delivery</b> or <b>Pay Online</b> (saves ₹50 COD fee) at checkout.
+          Payment links are sent via WhatsApp.
+        </p>
+      </div>
+      <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.1)', maxWidth: 560 }}>
+        <form onSubmit={save}>
+          {/* Enable toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, padding: '12px 16px', background: '#f0fff4', borderRadius: 8, border: '1px solid #c6f6d5' }}>
+            <input
+              type="checkbox"
+              id="payment_enabled"
+              checked={!!form.payment_enabled}
+              onChange={e => setForm(f => ({ ...f, payment_enabled: e.target.checked }))}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+            <label htmlFor="payment_enabled" style={{ fontWeight: 600, fontSize: 14, cursor: 'pointer', color: '#276749' }}>
+              Enable Online Payment at Checkout
+            </label>
+          </div>
+
+          {inp('Razorpay Key ID',         'razorpay_key_id',         'text',     'From Razorpay Dashboard → Settings → API Keys')}
+          {inp('Razorpay Key Secret',      'razorpay_key_secret',     'password', 'Never share this. Used to create payment links.', showSec, () => setShowSec(s => !s))}
+          {inp('Razorpay Webhook Secret',  'razorpay_webhook_secret', 'password', 'Set in Razorpay Dashboard → Settings → Webhooks. Webhook URL: https://whatsapp.nodesurge.tech/api/payment/webhook', showWh, () => setShowWh(s => !s))}
+
+          <div style={{ background: '#fffbeb', border: '1px solid #f6e05e', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 12, color: '#744210' }}>
+            <b>Webhook events to subscribe:</b> payment_link.paid, payment.captured
+          </div>
+
+          {error && <div style={{ padding: '10px 14px', background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, color: '#c53030', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+          {saved && <div style={{ padding: '10px 14px', background: '#f0fff4', border: '1px solid #68d391', borderRadius: 8, color: '#276749', fontSize: 13, marginBottom: 16 }}>✓ Saved successfully</div>}
+
+          <button type="submit" disabled={saving}
+            style={{ padding: '10px 28px', background: '#25d366', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: saving ? 'not-allowed' : 'pointer' }}>
+            {saving ? 'Saving...' : 'Save Payment Settings'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 const TABS = [
   { id: 'whatsapp', label: '⚙️ WhatsApp Config' },
   { id: 'canned',   label: '💬 Canned Responses' },
   { id: 'labels',   label: '🏷️ Labels' },
   { id: 'apikeys',  label: '🔑 API Keys' },
   { id: 'webhooks', label: '🔗 Webhooks' },
+  { id: 'payment',  label: '💳 Payment' },
 ];
 
 export default function Settings() {
@@ -1063,6 +1163,7 @@ export default function Settings() {
       {activeTab === 'labels'   && <LabelsTab />}
       {activeTab === 'apikeys'  && <ApiKeysTab />}
       {activeTab === 'webhooks' && <WebhooksTab />}
+      {activeTab === 'payment'  && <PaymentTab />}
     </div>
   );
 }

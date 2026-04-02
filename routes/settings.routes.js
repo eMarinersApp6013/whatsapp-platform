@@ -217,4 +217,47 @@ router.put('/shipping-rates/:id', async (req, res) => {
   }
 })
 
+// ── GET /api/settings/razorpay ────────────────────────────────────────────────
+router.get('/razorpay', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT razorpay_key_id, razorpay_key_secret, razorpay_webhook_secret, payment_enabled FROM tenants WHERE id=1'
+    )
+    const r = rows[0] || {}
+    return res.json({
+      ok: true,
+      data: {
+        razorpay_key_id:        r.razorpay_key_id        || '',
+        razorpay_key_secret:    mask(r.razorpay_key_secret),
+        razorpay_webhook_secret: mask(r.razorpay_webhook_secret),
+        payment_enabled:        r.payment_enabled || false,
+      }
+    })
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+// ── POST /api/settings/razorpay ───────────────────────────────────────────────
+router.post('/razorpay', async (req, res) => {
+  try {
+    const { razorpay_key_id, razorpay_key_secret, razorpay_webhook_secret, payment_enabled } = req.body
+    const fields = []; const vals = []; let i = 1
+    if (razorpay_key_id !== undefined)        { fields.push(`razorpay_key_id=$${i++}`);        vals.push(razorpay_key_id) }
+    if (razorpay_key_secret && !razorpay_key_secret.includes('****')) {
+      fields.push(`razorpay_key_secret=$${i++}`); vals.push(razorpay_key_secret)
+    }
+    if (razorpay_webhook_secret && !razorpay_webhook_secret.includes('****')) {
+      fields.push(`razorpay_webhook_secret=$${i++}`); vals.push(razorpay_webhook_secret)
+    }
+    if (payment_enabled !== undefined)        { fields.push(`payment_enabled=$${i++}`);        vals.push(payment_enabled) }
+    if (!fields.length) return res.status(400).json({ ok: false, error: 'No fields provided' })
+    vals.push(1)
+    await pool.query(`UPDATE tenants SET ${fields.join(', ')} WHERE id=$${i}`, vals)
+    return res.json({ ok: true, message: 'Razorpay settings saved' })
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
 module.exports = router
