@@ -13,6 +13,7 @@ import Agents from './pages/Agents';
 import Bundles from './pages/Bundles';
 import RestockAlerts from './pages/RestockAlerts';
 import ShippingZones from './pages/ShippingZones';
+import Automation from './pages/Automation';
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem('token');
@@ -43,6 +44,7 @@ export default function App() {
                   <Route path="/bundles"        element={<Bundles />} />
                   <Route path="/restock-alerts" element={<RestockAlerts />} />
                   <Route path="/shipping-zones" element={<ShippingZones />} />
+                  <Route path="/automation"    element={<Automation />} />
                 </Routes>
               </Layout>
             </PrivateRoute>

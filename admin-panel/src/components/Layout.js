@@ -11,6 +11,7 @@ const NAV = [
   { to: '/bundles',       icon: '🎁', label: 'Bundles' },
   { to: '/restock-alerts',icon: '🔔', label: 'Restock Alerts' },
   { to: '/shipping-zones',icon: '🚚', label: 'Shipping Zones' },
+  { to: '/automation',    icon: '🤖', label: 'Automation' },
   { to: '/settings',      icon: '⚙️',  label: 'Settings' },
 ];
 

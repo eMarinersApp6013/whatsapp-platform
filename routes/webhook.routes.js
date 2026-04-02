@@ -174,13 +174,40 @@ async function processMessage(phone, content, msgType, mediaUrl, app) {
       const cart = await getCartData(phone)
       if (!cart.items?.length) {
         await metaSvc.sendText(phone, '🛒 Your cart is empty! Browse our products first.')
-      } else {
-        await metaSvc.sendText(phone,
-          `✅ Your order total is *₹${(cart.total || cart.subtotal || 0).toFixed(0)}*\n\nPlease share your delivery address to proceed:\n\n*Format:* House/Flat No, Street, City, State, PIN`
-        )
+        return
       }
+      const subtotal = cart.subtotal || cart.total || 0
+      const itemList = (cart.items || []).map(i => `• ${i.name} × ${i.qty}  ₹${(i.price * i.qty).toFixed(0)}`).join('\n')
+      await metaSvc.sendText(phone,
+        `🛒 *Your Cart:*\n\n${itemList}\n\n` +
+        `─────────────────\n` +
+        `Subtotal: ₹${subtotal.toFixed(0)}\n` +
+        `COD Fee:  ₹50\n` +
+        `*Total:   ₹${(subtotal + 50).toFixed(0)}*\n\n` +
+        `📍 Please share your *delivery address* to confirm:\n\n` +
+        `Format: House/Flat, Street, City, State, PIN\n` +
+        `Example: 42B Navy Colony, MG Road, Mumbai, Maharashtra, 400001`
+      )
+      // Mark client as awaiting address
+      await pool.query(
+        "UPDATE clients SET meta = COALESCE(meta,'{}')::jsonb || '{\"awaiting_address\":true}'::jsonb WHERE tenant_id=$1 AND phone=$2",
+        [TENANT_ID, phone]
+      ).catch(() => {})
       return
     }
+
+    if (cmd === 'CANCEL ORDER' || cmd === 'CANCEL') {
+      await pool.query(
+        "UPDATE clients SET meta = COALESCE(meta,'{}')::jsonb - 'awaiting_address' WHERE tenant_id=$1 AND phone=$2",
+        [TENANT_ID, phone]
+      ).catch(() => {})
+      await metaSvc.sendText(phone, '✅ Checkout cancelled. Your cart is saved!\n\nReply *CART* to view or *CHECKOUT* to try again.')
+      return
+    }
+
+    // Address capture state
+    const addressResult = await handleAddressCapture(phone, content, client, app)
+    if (addressResult) return
 
     // 8. Handle audio — transcribe and treat as search
     if (msgType === 'audio' && mediaUrl) {
@@ -387,6 +414,110 @@ async function transcribeAudio(audioUrl) {
     const result = await openai.audio.transcriptions.create({ file, model: 'whisper-1' })
     return result.text
   } catch { return null }
+}
+
+// ── Address capture + order creation ─────────────────────────────────────────
+async function handleAddressCapture(phone, content, client, app) {
+  try {
+    // Check if client is awaiting address
+    const { rows: clientRows } = await pool.query(
+      'SELECT meta FROM clients WHERE tenant_id=$1 AND id=$2',
+      [TENANT_ID, client.id]
+    )
+    const meta = clientRows[0]?.meta || {}
+    if (!meta.awaiting_address) return false
+
+    // Basic address validation: must have a PIN code (6 digits)
+    const pinMatch = content.match(/\b(\d{6})\b/)
+    if (!pinMatch) {
+      await metaSvc.sendText(phone,
+        `❗ That doesn't look like a complete address.\n\nPlease include your 6-digit PIN code.\n\nExample: 42B Navy Colony, MG Road, Mumbai, Maharashtra, *400001*\n\nOr reply *CANCEL* to cancel checkout.`
+      )
+      return true  // consumed — don't pass to AI
+    }
+
+    const address  = content.trim()
+    const pincode  = pinMatch[1]
+    const cart     = await getCartData(phone)
+
+    if (!cart.items?.length) {
+      await metaSvc.sendText(phone, '🛒 Your cart is empty! Nothing to order.')
+      await clearAwaitingAddress(phone)
+      return true
+    }
+
+    const subtotal = cart.subtotal || cart.total || 0
+    const codFee   = 50
+    const total    = subtotal + codFee
+
+    // Generate order number
+    const ts = Date.now().toString().slice(-6)
+    const orderNumber = `NS${new Date().getFullYear()}${ts}`
+
+    // Create order
+    const { rows: [order] } = await pool.query(
+      `INSERT INTO orders
+         (tenant_id, client_id, order_number, status, items, subtotal, total_amount, shipping_address, payment_method, notes)
+       VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, 'COD', $8)
+       RETURNING *`,
+      [
+        TENANT_ID,
+        client.id,
+        orderNumber,
+        JSON.stringify(cart.items),
+        subtotal.toFixed(2),
+        total.toFixed(2),
+        address,
+        `COD fee: ₹${codFee}. PIN: ${pincode}`,
+      ]
+    )
+
+    // Clear cart
+    await pool.query(
+      "UPDATE carts SET items='[]'::jsonb, updated_at=NOW() WHERE tenant_id=$1 AND client_id=$2 AND status='active'",
+      [TENANT_ID, client.id]
+    )
+
+    // Clear awaiting_address flag
+    await clearAwaitingAddress(phone)
+
+    // Confirmation message
+    const itemList = (cart.items || []).map(i =>
+      `• ${i.name} × ${i.qty}  ₹${(i.price * i.qty).toFixed(0)}`
+    ).join('\n')
+
+    await metaSvc.sendText(phone,
+      `✅ *Order Confirmed!*\n\n` +
+      `Order #: *${orderNumber}*\n\n` +
+      `${itemList}\n\n` +
+      `─────────────────\n` +
+      `Subtotal:  ₹${subtotal.toFixed(0)}\n` +
+      `COD Fee:   ₹${codFee}\n` +
+      `*Total:    ₹${total.toFixed(0)}*\n\n` +
+      `📍 Delivering to:\n${address}\n\n` +
+      `💳 Payment: Cash on Delivery\n\n` +
+      `We'll notify you when your order ships! 🚚\nReply *ORDERS* to track your order.`
+    )
+
+    // Emit to admin panel
+    const io = app?.get('io')
+    if (io) {
+      io.emit('new_order', { order_number: orderNumber, total_amount: total, client_phone: phone })
+    }
+
+    console.log(`[checkout] Order ${orderNumber} created for ${phone}, total ₹${total}`)
+    return true
+  } catch (err) {
+    console.error('[handleAddressCapture]', err.message)
+    return false
+  }
+}
+
+async function clearAwaitingAddress(phone) {
+  await pool.query(
+    "UPDATE clients SET meta = COALESCE(meta,'{}')::jsonb - 'awaiting_address' WHERE tenant_id=$1 AND phone=$2",
+    [TENANT_ID, phone]
+  ).catch(() => {})
 }
 
 async function handleImageSearch(phone, imageUrl) {

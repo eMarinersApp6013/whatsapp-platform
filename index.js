@@ -37,6 +37,7 @@ const agentsRoutes          = require('./routes/agents.routes');
 const apiKeysRoutes         = require('./routes/apikeys.routes');
 const outgoingWebhookRoutes = require('./routes/outgoing-webhooks.routes');
 const publicApiRoutes       = require('./routes/public-api.routes');
+const automationApiRoutes   = require('./routes/automation.routes');
 
 app.use('/api/auth',      authRoutes);
 app.use('/api/dashboard', dashRoutes);
@@ -52,6 +53,7 @@ app.use('/api/agents',    agentsRoutes);
 app.use('/api/apikeys',   apiKeysRoutes);
 app.use('/api/webhooks',  outgoingWebhookRoutes);
 app.use('/v1',            publicApiRoutes);   // Public REST API (X-Api-Key auth)
+app.use('/api/automation', automationApiRoutes);
 app.use('/webhook',       webhookRoutes);
 
 // ── Socket.io: real-time messaging ────────────────────────────────────────────

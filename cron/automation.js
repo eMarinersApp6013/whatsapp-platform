@@ -329,4 +329,12 @@ function startAutomation() {
   console.log('[automation] keep-in-touch scheduler started')
 }
 
-module.exports = { startAutomation, automationQueue }
+module.exports = {
+  startAutomation,
+  automationQueue,
+  // Exported so admin API can trigger individual scans on demand
+  runCartAbandonment:  scheduleCartAbandonment,
+  runWishlistNudge:    scheduleWishlistNudge,
+  runReorderReminder:  scheduleReorderReminder,
+  runSpecialDay:       scheduleSpecialDayMessages,
+}

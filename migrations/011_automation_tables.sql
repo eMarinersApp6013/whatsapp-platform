@@ -3,6 +3,9 @@
 -- product_views: tracks page views for smart ranking
 -- products: add hsn_code, customization_fee columns
 
+-- ── Clients: meta column for checkout state ─────────────────────────────────
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}';
+
 -- ── Product enhancements ──────────────────────────────────────────────────────
 ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_code       VARCHAR(8)        DEFAULT NULL;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS customization_fee NUMERIC(10,2)  DEFAULT 0;
